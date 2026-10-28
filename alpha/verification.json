@@ -1,0 +1,18 @@
+{
+  "source_checks": 6,
+  "native_checks": 11,
+  "native_run": "test-results\\ecf0282e79ac47f4ae361f29592c1ab4",
+  "packaged_binary_hashes_match": true,
+  "source_hashes_match": true,
+  "clean_reference_unchanged": true,
+  "harness_hashes": {
+    "alpha.lua": "27232f35606887f55b05f9628aeb6ab8d6d34e4b714acae0ac95f94000846717",
+    "Start-Alpha.ps1": "4df7cc9647ec7a0864610df79035d58ae07a37a2657652ae90541fb33e9ee318",
+    "Exercise-Alpha.ps1": "fc56fe02b35b9fc398614e6badc6a621c73448a2061064fd27b9aaf4b746165b"
+  },
+  "interactive_launcher_visibility": {
+    "verified": true,
+    "title": "WezTerm OSC 7501 ALPHA",
+    "window_handle_nonzero": true
+  }
+}

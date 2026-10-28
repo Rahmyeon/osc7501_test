@@ -1,0 +1,19 @@
+# Local checkouts and research downloads are not submodules of this repository.
+/wezterm/
+/.research/*
+!/.research/export-alpha-patch.py
+!/.research/verify-architecture-guide.py
+!/.research/verify-testing-guide.py
+
+# Native builds remain available locally; do not commit executables or DLLs.
+/alpha/bin/
+/alpha/test-results/
+**/target/
+*.pdb
+
+# Local recovery archives, editor state and application playgrounds.
+/.recovery/
+/.obsidian/
+/alpha/opencode-playground/
+__pycache__/
+*.pyc

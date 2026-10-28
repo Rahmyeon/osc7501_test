@@ -1,0 +1,24 @@
+{
+  "built_at_utc": "2026-10-27T23:22:11.7326182Z",
+  "remote_mux_records": false,
+  "name": "WezTerm OSC 7501 local alpha",
+  "source_revision": "e2a98e1b8af156988ad0ac778658ac27b60a55fb",
+  "source_patch_sha256": "C8ABFD6E66268DA6B34803E24BE21816B422748F7DC02D22BDD784E63B2111B8",
+  "binaries": [
+    {
+      "sha256": "55B18996761C88C351820E82508E05AB0EC2194AEEAD20724FDFAEEDEC076EF4",
+      "file": "OpenConsole.exe"
+    },
+    {
+      "sha256": "C97A80FD8969C6B6D970BB0E50D9B806BE2B1A9922369F1BAFB49488C53EC799",
+      "file": "wezterm-gui.exe"
+    },
+    {
+      "sha256": "A1319C88039A8C8059734897AC7C90E8D827978DF3E5ADDA0EBA558C63920AF7",
+      "file": "wezterm.exe"
+    }
+  ],
+  "build_command": "cargo build -p wezterm-gui -p wezterm --offline",
+  "source_directory": "C:\\Users\\omotu\\projects\\osc7501\\.research\\wezterm",
+  "local_modifications": true
+}

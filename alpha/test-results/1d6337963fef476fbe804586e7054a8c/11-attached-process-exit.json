@@ -1,0 +1,1 @@
+{"actual":[{"app":"smoke","effective_app":"smoke","id":"complete","state":"done"},{"id":"exit-blocked","kind":"auth","state":"blocked"},{"id":"exit-working","state":"working"}],"case":"11-attached-process-exit","ok":false,"problem":"record count differs"}

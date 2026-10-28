@@ -1,0 +1,2071 @@
+diff --git a/docs/config/lua/PaneInformation.md b/docs/config/lua/PaneInformation.md
+index f8faaf6..4e72276 100644
+--- a/docs/config/lua/PaneInformation.md
++++ b/docs/config/lua/PaneInformation.md
+@@ -20,6 +20,7 @@ The `PaneInformation` struct contains the following fields:
+ * `title` - the title of the pane, per [pane:get_title()](pane/get_title.md) at the time the pane information was captured
+ * `user_vars` - the user variables defined for the pane, per [pane:get_user_vars()](pane/get_user_vars.md) at the time the pane information was captured.
+ * `progress` - the progress state, per [pane:get_progress()](pane/get_progress.md) at the time the pane information was captured. {{since('nightly', inline=True)}}
++* `program_status` - in the local OSC 7501 alpha, an owned list of records sorted by ID, per [pane:get_program_status()](pane/get_program_status.md), captured for title formatting. Remote mux records are not synchronized in this alpha.
+ 
+ {{since('20220101-133340-7edc5b5a')}}
+ 
+diff --git a/lua-api-crates/mux/src/pane.rs b/lua-api-crates/mux/src/pane.rs
+index e191c3f..3476788 100644
+--- a/lua-api-crates/mux/src/pane.rs
++++ b/lua-api-crates/mux/src/pane.rs
+@@ -153,6 +153,13 @@ impl UserData for MuxPane {
+             lua.to_value(&progress)
+         });
+ 
++        methods.add_method("get_program_status", |lua, this, _: ()| {
++            let mux = get_mux()?;
++            let pane = this.resolve(&mux)?;
++            let records = pane.get_program_status_records();
++            lua.to_value(&records)
++        });
++
+         methods.add_method("get_current_working_dir", |_, this, _: ()| {
+             let mux = get_mux()?;
+             let pane = this.resolve(&mux)?;
+@@ -495,3 +502,62 @@ impl SplitPane {
+         Ok(MuxPane(pane.pane_id()))
+     }
+ }
++
++#[cfg(test)]
++mod program_status_tests {
++    use super::*;
++    use wezterm_term::ProgramStatusRecord;
++
++    #[test]
++    fn program_status_lua_snapshot_is_a_sequence_with_optional_fields() -> mlua::Result<()> {
++        let lua = mlua::Lua::new();
++        let records = vec![
++            ProgramStatusRecord {
++                id: String::new(),
++                state: "working".to_string(),
++                kind: None,
++                progress: Some(40),
++                app: Some("cargo".to_string()),
++                title: None,
++                msg: None,
++                effective_app: Some("cargo".to_string()),
++            },
++            ProgramStatusRecord {
++                id: "build/test".to_string(),
++                state: "blocked".to_string(),
++                kind: Some("permission".to_string()),
++                progress: None,
++                app: None,
++                title: Some("Approve test access".to_string()),
++                msg: Some("Allow the integration test to continue".to_string()),
++                effective_app: Some("cargo".to_string()),
++            },
++        ];
++        // Lua configuration consumes this public data contract. Root identity,
++        // omitted fields and inherited app data must survive serde conversion.
++        lua.globals().set("records", lua.to_value(&records)?)?;
++        lua.load(
++            r#"
++            assert(#records == 2)
++            assert(records[1].id == "")
++            assert(records[1].state == "working")
++            assert(records[1].progress == 40)
++            assert(records[1].kind == nil and records[1].title == nil)
++            assert(records["build/test"] == nil)
++            assert(records[2].id == "build/test")
++            assert(records[2].state == "blocked")
++            assert(records[2].kind == "permission")
++            assert(records[2].app == nil and records[2].progress == nil)
++            assert(records[2].effective_app == "cargo")
++            assert(records[2].msg == "Allow the integration test to continue")
++            "#,
++        )
++        .exec()?;
++        lua.globals().set(
++            "empty_records",
++            lua.to_value(&Vec::<ProgramStatusRecord>::new())?,
++        )?;
++        lua.load("assert(type(empty_records) == 'table' and next(empty_records) == nil)")
++            .exec()
++    }
++}
+diff --git a/mux/src/lib.rs b/mux/src/lib.rs
+index 6d1a746..c02da59 100644
+--- a/mux/src/lib.rs
++++ b/mux/src/lib.rs
+@@ -55,6 +55,10 @@ pub const DEFAULT_WORKSPACE: &str = "default";
+ 
+ #[derive(Clone, Debug)]
+ pub enum MuxNotification {
++    /// Local-only state invalidation. Task snapshots are not in the mux codec.
++    ProgramStatusChanged {
++        pane_id: PaneId,
++    },
+     PaneOutput(PaneId),
+     PaneAdded(PaneId),
+     PaneRemoved(PaneId),
+diff --git a/mux/src/localpane.rs b/mux/src/localpane.rs
+index bffc521..1fc93ff 100644
+--- a/mux/src/localpane.rs
++++ b/mux/src/localpane.rs
+@@ -31,8 +31,9 @@ use url::Url;
+ use wezterm_dynamic::Value;
+ use wezterm_term::color::ColorPalette;
+ use wezterm_term::{
+-    Alert, AlertHandler, Clipboard, DownloadHandler, KeyCode, KeyModifiers, MouseEvent, Progress,
+-    SemanticZone, StableRowIndex, Terminal, TerminalConfiguration, TerminalSize,
++    Alert, AlertHandler, Clipboard, DownloadHandler, KeyCode, KeyModifiers, MouseEvent,
++    ProgramStatusRecord, Progress, SemanticZone, StableRowIndex, Terminal, TerminalConfiguration,
++    TerminalSize,
+ };
+ 
+ const PROC_INFO_CACHE_TTL: Duration = Duration::from_millis(300);
+@@ -288,6 +289,9 @@ impl Pane for LocalPane {
+                 };
+ 
+                 if let Some(status) = status {
++                    // The process may be held open after exit. Clear transient
++                    // records now, before applying buffered terminal output.
++                    self.terminal.lock().program_status_process_exited();
+                     let success = match status.success() {
+                         true => true,
+                         false => configuration()
+@@ -466,6 +470,10 @@ impl Pane for LocalPane {
+         self.terminal.lock().get_progress()
+     }
+ 
++    fn get_program_status_records(&self) -> Vec<ProgramStatusRecord> {
++        self.terminal.lock().get_program_status_records()
++    }
++
+     fn palette(&self) -> ColorPalette {
+         self.terminal.lock().palette()
+     }
+@@ -941,6 +949,16 @@ struct LocalPaneNotifHandler {
+ }
+ 
+ impl AlertHandler for LocalPaneNotifHandler {
++    fn program_status_changed(&mut self) {
++        let pane_id = self.pane_id;
++        promise::spawn::spawn_into_main_thread(async move {
++            if let Some(mux) = Mux::try_get() {
++                mux.notify(MuxNotification::ProgramStatusChanged { pane_id });
++            }
++        })
++        .detach();
++    }
++
+     fn alert(&mut self, alert: Alert) {
+         let pane_id = self.pane_id;
+         promise::spawn::spawn_into_main_thread(async move {
+diff --git a/mux/src/pane.rs b/mux/src/pane.rs
+index ce3f45f..8d47984 100644
+--- a/mux/src/pane.rs
++++ b/mux/src/pane.rs
+@@ -17,8 +17,8 @@ use url::Url;
+ use wezterm_dynamic::Value;
+ use wezterm_term::color::ColorPalette;
+ use wezterm_term::{
+-    Clipboard, DownloadHandler, KeyCode, KeyModifiers, MouseEvent, Progress, SemanticZone,
+-    StableRowIndex, TerminalConfiguration, TerminalSize,
++    Clipboard, DownloadHandler, KeyCode, KeyModifiers, MouseEvent, ProgramStatusRecord, Progress,
++    SemanticZone, StableRowIndex, TerminalConfiguration, TerminalSize,
+ };
+ 
+ static PANE_ID: ::std::sync::atomic::AtomicUsize = ::std::sync::atomic::AtomicUsize::new(0);
+@@ -240,6 +240,11 @@ pub trait Pane: Downcast + Send + Sync {
+     fn get_progress(&self) -> Progress {
+         Progress::None
+     }
++    /// Local terminal records in stable task-id order. Remote mux panes do not
++    /// synchronize OSC 7501 state yet and return an empty snapshot.
++    fn get_program_status_records(&self) -> Vec<ProgramStatusRecord> {
++        Vec::new()
++    }
+     fn send_paste(&self, text: &str) -> anyhow::Result<()>;
+     fn send_composed_text(&self, text: &str) -> anyhow::Result<()> {
+         self.writer().write_all(text.as_bytes())?;
+diff --git a/term/src/lib.rs b/term/src/lib.rs
+index 1fdb38b..bff8ae0 100644
+--- a/term/src/lib.rs
++++ b/term/src/lib.rs
+@@ -29,6 +29,9 @@ pub use config::TerminalConfiguration;
+ pub mod input;
+ pub use crate::input::*;
+ 
++pub mod program_status;
++pub use program_status::ProgramStatusRecord;
++
+ pub use wezterm_cell::*;
+ pub use wezterm_surface::line::*;
+ 
+diff --git a/term/src/terminal.rs b/term/src/terminal.rs
+index 4edaa7c..910b40d 100644
+--- a/term/src/terminal.rs
++++ b/term/src/terminal.rs
+@@ -75,6 +75,10 @@ pub enum Alert {
+ 
+ pub trait AlertHandler: Send + Sync {
+     fn alert(&mut self, alert: Alert);
++
++    /// Local state invalidation, deliberately separate from serializable Alert.
++    /// Embedders without a status consumer can leave the default implementation.
++    fn program_status_changed(&mut self) {}
+ }
+ 
+ pub trait DownloadHandler: Send + Sync {
+diff --git a/term/src/terminalstate/mod.rs b/term/src/terminalstate/mod.rs
+index 6fc0e7f..20b2f9f 100644
+--- a/term/src/terminalstate/mod.rs
++++ b/term/src/terminalstate/mod.rs
+@@ -350,6 +350,7 @@ pub struct TerminalState {
+     /// The icon title string (OSC 1)
+     icon_title: Option<String>,
+     progress: Progress,
++    program_status: crate::program_status::ProgramStatusStore,
+ 
+     palette: Option<ColorPalette>,
+ 
+@@ -595,6 +596,7 @@ impl TerminalState {
+             bidi_enabled: None,
+             bidi_hint: None,
+             progress: Progress::default(),
++            program_status: crate::program_status::ProgramStatusStore::default(),
+         }
+     }
+ 
+@@ -660,6 +662,30 @@ impl TerminalState {
+         self.progress.clone()
+     }
+ 
++    pub fn get_program_status_records(&self) -> Vec<crate::ProgramStatusRecord> {
++        self.program_status.presentation_snapshot()
++    }
++
++    pub(crate) fn notify_program_status_changed(&mut self) {
++        if let Some(handler) = self.alert_handler.as_mut() {
++            handler.program_status_changed();
++        }
++    }
++
++    /// A new shell prompt ends transient command state, not the attached shell.
++    pub fn finish_program_status_command(&mut self) {
++        if self.program_status.finish_command() {
++            self.notify_program_status_changed();
++        }
++    }
++
++    /// Called by the process owner even when a held pane stays visible.
++    pub fn program_status_process_exited(&mut self) {
++        if self.program_status.process_exited() {
++            self.notify_program_status_changed();
++        }
++    }
++
+     /// Returns the current working directory associated with the
+     /// terminal session.  The working directory can be changed by
+     /// the applicaiton using the OSC 7 escape sequence.
+diff --git a/term/src/terminalstate/performer.rs b/term/src/terminalstate/performer.rs
+index 25cdec6..e928d05 100644
+--- a/term/src/terminalstate/performer.rs
++++ b/term/src/terminalstate/performer.rs
+@@ -720,6 +720,9 @@ impl<'a> Performer<'a> {
+                 self.suppress_initial_title_change = false;
+                 self.accumulating_title.take();
+                 self.progress = Progress::default();
++                if self.program_status.clear("") {
++                    self.notify_program_status_changed();
++                }
+ 
+                 self.screen.full_reset();
+                 self.screen.activate_alt_screen(seqno);
+@@ -870,6 +873,7 @@ impl<'a> Performer<'a> {
+             OperatingSystemCommand::FinalTermSemanticPrompt(
+                 FinalTermSemanticPrompt::FreshLineAndStartPrompt { .. },
+             ) => {
++                self.finish_program_status_command();
+                 self.fresh_line();
+                 self.pen.set_semantic_type(SemanticType::Prompt);
+             }
+@@ -1079,6 +1083,20 @@ impl<'a> Performer<'a> {
+                 self.implicit_palette_reset_if_same_as_configured();
+                 self.palette_did_change();
+             }
++            OperatingSystemCommand::ProgramStatus(command) => {
++                use wezterm_escape_parser::program_status::{Command, SUPPORT_REPLY};
++                match command {
++                    Command::Query => {
++                        self.writer.write_all(SUPPORT_REPLY).ok();
++                        self.writer.flush().ok();
++                    }
++                    Command::Report(report) => {
++                        if self.program_status.apply(report) {
++                            self.notify_program_status_changed();
++                        }
++                    }
++                }
++            }
+             OperatingSystemCommand::ConEmuProgress(prog) => {
+                 use wezterm_escape_parser::osc::Progress as TProg;
+                 let prog = match prog {
+diff --git a/term/src/test/mod.rs b/term/src/test/mod.rs
+index 592d5aa..335f9cf 100644
+--- a/term/src/test/mod.rs
++++ b/term/src/test/mod.rs
+@@ -7,6 +7,7 @@ use bitflags::bitflags;
+ mod c1;
+ mod csi;
+ mod image;
++mod program_status;
+ // mod selection; FIXME: port to render layer
+ use crate::color::ColorPalette;
+ use k9::assert_equal as assert_eq;
+diff --git a/vtparse/src/lib.rs b/vtparse/src/lib.rs
+index c4852e1..d423d83 100644
+--- a/vtparse/src/lib.rs
++++ b/vtparse/src/lib.rs
+@@ -173,6 +173,8 @@ pub trait VTActor {
+     fn csi_dispatch(&mut self, params: &[CsiParam], parameters_truncated: bool, byte: u8);
+ 
+     /// Called when an OSC string is terminated by ST, CAN, SUB or ESC.
++    /// OSC 7501 is dispatched only after a complete terminator; canceled or
++    /// oversized program-status reports are discarded instead.
+     ///
+     /// `params` is an array of byte strings (which may also be valid utf-8)
+     /// that were passed as semicolon separated parameters to the operating
+@@ -313,6 +315,8 @@ impl VTActor for CollectingVTActor {
+ const MAX_INTERMEDIATES: usize = 2;
+ const MAX_OSC: usize = 64;
+ const MAX_PARAMS: usize = 256;
++// OSC 7501 reserves two bytes for ST, including when BEL terminates it.
++const MAX_PROGRAM_STATUS_BYTES_BEFORE_ST: usize = 4096 - 2;
+ 
+ struct OscState {
+     #[cfg(any(feature = "std", feature = "alloc"))]
+@@ -322,11 +326,31 @@ struct OscState {
+     param_indices: [usize; MAX_OSC],
+     num_params: usize,
+     full: bool,
++    bytes: usize,
++    program_status: bool,
++    discard_program_status: bool,
++    awaiting_program_status_st: bool,
+ }
+ 
+ impl OscState {
+     fn put(&mut self, param: char) {
+-        if param == ';' {
++        if self.discard_program_status {
++            return;
++        }
++        if param == ';' && self.num_params == 1 && self.buffer.as_slice() == b"7501" {
++            self.program_status = true;
++            // Ignored bytes in the introducer must not manufacture a valid
++            // protocol number. The ordinary spelling is ESC ] 7 5 0 1 ;.
++            self.discard_program_status = self.bytes != 7;
++            self.check_program_status_limit();
++            if self.discard_program_status {
++                return;
++            }
++        }
++        // Unlike other OSCs, 7501 has one colon-separated body. Preserve any
++        // semicolons in that body so the higher-level parser can skip malformed
++        // pairs without silently accepting a truncated prefix.
++        if param == ';' && !(self.program_status && self.num_params >= 2) {
+             match self.num_params {
+                 MAX_OSC => {
+                     self.full = true;
+@@ -346,6 +370,7 @@ impl OscState {
+             {
+                 if extend_result.is_err() {
+                     self.full = true;
++                    self.discard_program_status = self.program_status;
+                     return;
+                 }
+             }
+@@ -357,6 +382,13 @@ impl OscState {
+             }
+         }
+     }
++
++    fn check_program_status_limit(&mut self) {
++        if self.program_status && self.bytes > MAX_PROGRAM_STATUS_BYTES_BEFORE_ST {
++            self.discard_program_status = true;
++            self.buffer.clear();
++        }
++    }
+ }
+ 
+ /// The virtual terminal parser.  It works together with an implementation of `VTActor`.
+@@ -461,6 +493,10 @@ impl VTParser {
+                 param_indices,
+                 num_params: 0,
+                 full: false,
++                bytes: 0,
++                program_status: false,
++                discard_program_status: false,
++                awaiting_program_status_st: false,
+             },
+ 
+             params: [CsiParam::default(); MAX_PARAMS],
+@@ -529,8 +565,13 @@ impl VTParser {
+             Action::Clear => {
+                 self.num_intermediates = 0;
+                 self.ignored_excess_intermediates = false;
+-                self.osc.num_params = 0;
+-                self.osc.full = false;
++                if !self.osc.awaiting_program_status_st {
++                    self.osc.num_params = 0;
++                    self.osc.full = false;
++                    self.osc.bytes = 0;
++                    self.osc.program_status = false;
++                    self.osc.discard_program_status = false;
++                }
+                 self.num_params = 0;
+                 self.params_full = false;
+                 self.current_param.take();
+@@ -538,8 +579,10 @@ impl VTParser {
+                 {
+                     self.apc_data.clear();
+                     self.apc_data.shrink_to_fit();
+-                    self.osc.buffer.clear();
+-                    self.osc.buffer.shrink_to_fit();
++                    if !self.osc.awaiting_program_status_st {
++                        self.osc.buffer.clear();
++                        self.osc.buffer.shrink_to_fit();
++                    }
+                 }
+             }
+             Action::Collect => {
+@@ -617,11 +660,17 @@ impl VTParser {
+                 self.osc.buffer.shrink_to_fit();
+                 self.osc.num_params = 0;
+                 self.osc.full = false;
++                self.osc.bytes = 2; // Reserve the OSC introducer, ESC ].
++                self.osc.program_status = false;
++                self.osc.discard_program_status = false;
++                self.osc.awaiting_program_status_st = false;
+             }
+             Action::OscPut => self.osc.put(param as char),
+ 
+             Action::OscEnd => {
+-                if self.osc.num_params == 0 {
++                if self.osc.discard_program_status || self.osc.awaiting_program_status_st {
++                    // Never dispatch a valid-looking prefix of a rejected report.
++                } else if self.osc.num_params == 0 {
+                     actor.osc_dispatch(&[]);
+                 } else {
+                     let mut params: [&[u8]; MAX_OSC] = [b""; MAX_OSC];
+@@ -700,6 +749,12 @@ impl VTParser {
+                 if action == Action::Execute
+                     || (state != self.utf8_return_state && state != State::Utf8Sequence)
+                 {
++                    if self.utf8_return_state == State::OscString
++                        && self.osc.program_status
++                        && byte != 0x9c
++                    {
++                        self.osc.discard_program_status = true;
++                    }
+                     self.action(lookup_exit(self.utf8_return_state), 0, actor);
+                     self.action(action, byte, actor);
+                     self.action(lookup_entry(state), 0, actor);
+@@ -722,6 +777,58 @@ impl VTParser {
+     /// methods on the provided `actor`.
+     #[inline(always)]
+     pub fn parse_byte(&mut self, byte: u8, actor: &mut dyn VTActor) {
++        if self.osc.awaiting_program_status_st {
++            self.osc.awaiting_program_status_st = false;
++            if byte == b'\\' {
++                if !self.osc.discard_program_status {
++                    // The 7501 introducer is four bytes and its entire body is
++                    // retained as the second parameter, including semicolons.
++                    actor.osc_dispatch(&[&self.osc.buffer[..4], &self.osc.buffer[4..]]);
++                }
++                self.osc.buffer.clear();
++                self.osc.num_params = 0;
++                self.osc.program_status = false;
++                self.osc.discard_program_status = false;
++                self.state = State::Ground;
++                self.utf8_return_state = State::Ground;
++                return;
++            }
++            // ESC followed by anything other than backslash cancels this
++            // report. Continue processing that byte as an ordinary ESC command.
++            self.osc.buffer.clear();
++            self.osc.num_params = 0;
++            self.osc.program_status = false;
++            self.osc.discard_program_status = false;
++        }
++        if self.state == State::OscString && byte == 0x1b && self.osc.program_status {
++            self.osc.awaiting_program_status_st = true;
++        }
++        if self.state == State::OscString
++            || (self.state == State::Utf8Sequence && self.utf8_return_state == State::OscString)
++        {
++            // Count raw bytes, including ignored controls, rather than just the
++            // decoded text retained in the OSC buffer. Terminators are reserved
++            // separately; the second byte of ESC \\ arrives outside OscString.
++            if self.state == State::Utf8Sequence || !matches!(byte, 0x07 | 0x1b | 0x9c) {
++                self.osc.bytes = self.osc.bytes.saturating_add(1);
++                self.osc.check_program_status_limit();
++            }
++        }
++        if self.state == State::OscString && self.osc.program_status {
++            let (_, next_state) = lookup(self.state, byte);
++            if next_state != State::OscString
++                && next_state != State::Utf8Sequence
++                && !matches!(byte, 0x07 | 0x1b | 0x9c)
++            {
++                self.osc.discard_program_status = true;
++            }
++            // Preserve otherwise ignored C0/DEL bytes in the body. Validation
++            // must see a malformed id rather than a normalized valid/root id.
++            if (byte < 0x20 && !matches!(byte, 0x07 | 0x18 | 0x1a | 0x1b)) || byte == 0x7f {
++                self.osc.put(byte as char);
++                return;
++            }
++        }
+         // While in utf-8 parsing mode, co-opt the vt state
+         // table and instead use the utf-8 state table from the
+         // parser.  It will drop us back into the Ground state
+@@ -828,6 +935,103 @@ mod test {
+         );
+     }
+ 
++    #[test]
++    fn program_status_waits_for_complete_st() {
++        let mut parser = VTParser::new();
++        let mut actor = CollectingVTActor::default();
++        parser.parse(b"\x1b]7501;state=working\x1b", &mut actor);
++        assert!(actor.actions.is_empty());
++        parser.parse(b"\\", &mut actor);
++        assert_eq!(
++            actor.into_vec(),
++            vec![VTAction::OscDispatch(vec![
++                b"7501".to_vec(),
++                b"state=working".to_vec()
++            ])]
++        );
++        assert!(parse_as_vec(b"\x1b]7501;state=working\x1b[0m")
++            .iter()
++            .all(|action| !matches!(action, VTAction::OscDispatch(_))));
++    }
++
++    #[test]
++    fn program_status_cancellation_does_not_dispatch_a_prefix() {
++        for cancel in [0x18, 0x1a, 0x90, 0x9b, 0x9d] {
++            let mut parser = VTParser::new();
++            let mut actor = CollectingVTActor::default();
++            parser.parse(b"\x1b]7501;state=working", &mut actor);
++            parser.parse(&[cancel], &mut actor);
++            assert!(actor
++                .actions
++                .iter()
++                .all(|action| !matches!(action, VTAction::OscDispatch(_))));
++            // CAN returns any replacement escape sequence to ground.
++            parser.parse(b"\x18\x1b]7501;?\x07", &mut actor);
++            assert_eq!(
++                actor.actions.last(),
++                Some(&VTAction::OscDispatch(vec![
++                    b"7501".to_vec(),
++                    b"?".to_vec()
++                ]))
++            );
++        }
++    }
++
++    #[test]
++    fn program_status_has_bounded_unterminated_storage() {
++        for terminator in [b"\x07".as_slice(), b"\x1b\\"] {
++            let mut parser = VTParser::new();
++            let mut actor = CollectingVTActor::default();
++            parser.parse(b"\x1b]7501;state=working:future=", &mut actor);
++            parser.parse(&vec![b'x'; 16384], &mut actor);
++            assert!(parser.osc.discard_program_status);
++            assert!(parser.osc.buffer.is_empty());
++            assert!(actor.actions.is_empty());
++            parser.parse(terminator, &mut actor);
++            assert!(actor.actions.is_empty());
++            parser.parse(b"\x1b]7501;?\x07", &mut actor);
++            assert_eq!(actor.actions.len(), 1);
++        }
++
++        // Ignored C0 bytes still count toward the wire limit.
++        let mut parser = VTParser::new();
++        let mut actor = CollectingVTActor::default();
++        parser.parse(b"\x1b]7501;state=working", &mut actor);
++        parser.parse(&vec![0; 4096], &mut actor);
++        parser.parse(b"\x07", &mut actor);
++        assert!(actor.actions.is_empty());
++    }
++
++    #[test]
++    fn program_status_cap_and_semicolons_are_protocol_specific() {
++        let mut wire = b"\x1b]7501;".to_vec();
++        wire.extend_from_slice(&vec![b'x'; 4087]);
++        wire.extend_from_slice(b"\x1b\\");
++        assert_eq!(wire.len(), 4096);
++        assert_eq!(parse_as_vec(&wire).len(), 1);
++        wire.insert(wire.len() - 2, b'x');
++        assert!(parse_as_vec(&wire).is_empty());
++
++        let body = format!("state=working:future={}:progress=1", ";".repeat(100));
++        assert_eq!(
++            parse_as_vec(format!("\x1b]7501;{body}\x07").as_bytes()),
++            vec![VTAction::OscDispatch(vec![
++                b"7501".to_vec(),
++                body.as_bytes().to_vec()
++            ])]
++        );
++
++        // Unrelated OSC commands retain their existing framing and capacity.
++        let title = "x".repeat(5000);
++        assert_eq!(
++            parse_as_vec(format!("\x1b]2;{title}\x07").as_bytes()),
++            vec![VTAction::OscDispatch(vec![
++                b"2".to_vec(),
++                title.as_bytes().to_vec()
++            ])]
++        );
++    }
++
+     #[test]
+     fn test_decset() {
+         assert_eq!(
+diff --git a/wezterm-escape-parser/src/lib.rs b/wezterm-escape-parser/src/lib.rs
+index c9ea144..34622ce 100644
+--- a/wezterm-escape-parser/src/lib.rs
++++ b/wezterm-escape-parser/src/lib.rs
+@@ -32,6 +32,7 @@ pub mod esc;
+ pub mod hyperlink;
+ pub mod osc;
+ pub mod parser;
++pub mod program_status;
+ #[cfg(feature = "tmux_cc")]
+ pub mod tmux_cc;
+ 
+diff --git a/wezterm-escape-parser/src/osc.rs b/wezterm-escape-parser/src/osc.rs
+index 67368cf..2f17a7d 100644
+--- a/wezterm-escape-parser/src/osc.rs
++++ b/wezterm-escape-parser/src/osc.rs
+@@ -52,6 +52,7 @@ pub enum OperatingSystemCommand {
+     ResetColors(Vec<u8>),
+     RxvtExtension(Vec<String>),
+     ConEmuProgress(Progress),
++    ProgramStatus(crate::program_status::Command),
+ 
+     Unspecified(Vec<Vec<u8>>),
+ }
+@@ -317,6 +318,33 @@ impl OperatingSystemCommand {
+             )),
+             SetHyperlink => Ok(OperatingSystemCommand::SetHyperlink(Hyperlink::parse(osc)?)),
+             ManipulateSelectionData => Self::parse_selection(osc),
++            ProgramStatus => {
++                ensure!(osc.len() >= 2, "missing OSC 7501 body");
++                let body;
++                let bytes = if osc.len() == 2 {
++                    osc[1]
++                } else {
++                    // Direct callers can supply the generic semicolon-split
++                    // form. Rebuild it so only the malformed pair is skipped.
++                    let len = osc[1..]
++                        .iter()
++                        .try_fold(osc.len() - 2, |n, p| n.checked_add(p.len()))
++                        .filter(|n| *n <= crate::program_status::MAX_BODY_BYTES)
++                        .ok_or_else(|| format_err!("OSC 7501 body too long"))?;
++                    let mut joined = Vec::with_capacity(len);
++                    for (index, part) in osc[1..].iter().enumerate() {
++                        if index > 0 {
++                            joined.push(b';');
++                        }
++                        joined.extend_from_slice(part);
++                    }
++                    body = joined;
++                    &body
++                };
++                crate::program_status::Command::parse_body(bytes)
++                    .map(OperatingSystemCommand::ProgramStatus)
++                    .map_err(|err| format_err!("invalid OSC 7501: {:?}", err))
++            }
+             SystemNotification => {
+                 if osc.len() >= 3 && osc[1] == b"4" {
+                     fn get_pct(v: &&[u8]) -> u8 {
+@@ -499,6 +527,7 @@ osc_entries!(
+     RxvtProprietary = "777",
+     FinalTermSemanticPrompt = "133",
+     ITermProprietary = "1337",
++    ProgramStatus = "7501",
+     /// Here the "Sun" suffix comes from the table in
+     /// <https://invisible-island.net/xterm/ctlseqs/ctlseqs.html#h3-Miscellaneous>
+     /// that lays out various window related escape sequences.
+@@ -607,6 +636,7 @@ impl Display for OperatingSystemCommand {
+                 write!(f, "{}", 100 + *color as u8)?;
+             }
+             CurrentWorkingDirectory(s) => write!(f, "7;{}", s)?,
++            ProgramStatus(command) => write!(f, "7501;{command}")?,
+             ConEmuProgress(Progress::None) => write!(f, "9;4;0")?,
+             ConEmuProgress(Progress::SetPercentage(pct)) => write!(f, "9;4;1;{pct}")?,
+             ConEmuProgress(Progress::SetError(pct)) => write!(f, "9;4;2;{pct}")?,
+diff --git a/wezterm-gui/src/frontend.rs b/wezterm-gui/src/frontend.rs
+index 04c8426..63868e4 100644
+--- a/wezterm-gui/src/frontend.rs
++++ b/wezterm-gui/src/frontend.rs
+@@ -94,6 +94,7 @@ impl GuiFrontEnd {
+                 MuxNotification::WindowInvalidated(_) => {}
+                 MuxNotification::PaneOutput(_) => {}
+                 MuxNotification::PaneAdded(_) => {}
++                MuxNotification::ProgramStatusChanged { .. } => {}
+                 MuxNotification::Alert {
+                     pane_id,
+                     alert:
+diff --git a/wezterm-gui/src/overlay/copy.rs b/wezterm-gui/src/overlay/copy.rs
+index 327cb4b..f603e0f 100644
+--- a/wezterm-gui/src/overlay/copy.rs
++++ b/wezterm-gui/src/overlay/copy.rs
+@@ -1103,6 +1103,10 @@ impl CopyRenderable {
+ }
+ 
+ impl Pane for CopyOverlay {
++    fn get_program_status_records(&self) -> Vec<wezterm_term::ProgramStatusRecord> {
++        self.delegate.get_program_status_records()
++    }
++
+     fn pane_id(&self) -> PaneId {
+         self.delegate.pane_id()
+     }
+diff --git a/wezterm-gui/src/overlay/quickselect.rs b/wezterm-gui/src/overlay/quickselect.rs
+index ce3e7ce..14e2dbb 100644
+--- a/wezterm-gui/src/overlay/quickselect.rs
++++ b/wezterm-gui/src/overlay/quickselect.rs
+@@ -378,6 +378,10 @@ impl QuickSelectOverlay {
+ }
+ 
+ impl Pane for QuickSelectOverlay {
++    fn get_program_status_records(&self) -> Vec<wezterm_term::ProgramStatusRecord> {
++        self.delegate.get_program_status_records()
++    }
++
+     fn pane_id(&self) -> PaneId {
+         self.delegate.pane_id()
+     }
+diff --git a/wezterm-gui/src/termwindow/mod.rs b/wezterm-gui/src/termwindow/mod.rs
+index 27567d9..bc4afb4 100644
+--- a/wezterm-gui/src/termwindow/mod.rs
++++ b/wezterm-gui/src/termwindow/mod.rs
+@@ -67,7 +67,9 @@ use wezterm_dynamic::Value;
+ use wezterm_font::FontConfiguration;
+ use wezterm_term::color::ColorPalette;
+ use wezterm_term::input::LastMouseClick;
+-use wezterm_term::{Alert, Progress, StableRowIndex, TerminalConfiguration, TerminalSize};
++use wezterm_term::{
++    Alert, ProgramStatusRecord, Progress, StableRowIndex, TerminalConfiguration, TerminalSize,
++};
+ 
+ pub mod background;
+ pub mod box_model;
+@@ -273,6 +275,7 @@ pub struct PaneInformation {
+     pub title: String,
+     pub user_vars: HashMap<String, String>,
+     pub progress: Progress,
++    pub program_status: Vec<ProgramStatusRecord>,
+ }
+ 
+ impl UserData for PaneInformation {
+@@ -289,6 +292,9 @@ impl UserData for PaneInformation {
+         fields.add_field_method_get("pixel_width", |_, this| Ok(this.pixel_width));
+         fields.add_field_method_get("pixel_height", |_, this| Ok(this.pixel_height));
+         fields.add_field_method_get("progress", |lua, this| lua.to_value(&this.progress));
++        fields.add_field_method_get("program_status", |lua, this| {
++            lua.to_value(&this.program_status)
++        });
+         fields.add_field_method_get("title", |_, this| Ok(this.title.clone()));
+         fields.add_field_method_get("user_vars", |_, this| Ok(this.user_vars.clone()));
+         fields.add_field_method_get("foreground_process_name", |_, this| {
+@@ -1206,6 +1212,11 @@ impl TermWindow {
+                 } => {
+                     self.emit_user_var_event(pane_id, name, value);
+                 }
++                MuxNotification::ProgramStatusChanged { pane_id } => {
++                    if self.window_contains_pane(pane_id) {
++                        self.update_title();
++                    }
++                }
+                 MuxNotification::WindowTitleChanged { .. }
+                 | MuxNotification::Alert {
+                     alert:
+@@ -1469,6 +1480,7 @@ impl TermWindow {
+                     | Alert::SetUserVar { .. }
+                     | Alert::Bell,
+             }
++            | MuxNotification::ProgramStatusChanged { pane_id }
+             | MuxNotification::PaneFocused(pane_id)
+             | MuxNotification::PaneRemoved(pane_id)
+             | MuxNotification::PaneOutput(pane_id) => {
+@@ -3452,6 +3464,7 @@ impl TermWindow {
+             title: pos.pane.get_title(),
+             user_vars: pos.pane.copy_user_vars(),
+             progress: pos.pane.get_progress(),
++            program_status: pos.pane.get_program_status_records(),
+         }
+     }
+ 
+diff --git a/wezterm-mux-server-impl/src/dispatch.rs b/wezterm-mux-server-impl/src/dispatch.rs
+index c3728f1..7710beb 100644
+--- a/wezterm-mux-server-impl/src/dispatch.rs
++++ b/wezterm-mux-server-impl/src/dispatch.rs
+@@ -112,6 +112,9 @@ where
+                 handler.schedule_pane_push(pane_id);
+             }
+             Ok(Item::Notif(MuxNotification::PaneAdded(_pane_id))) => {}
++            // OSC 7501 snapshots are local-only in this alpha. Do not extend
++            // serializable Alert or imply that clients receive these records.
++            Ok(Item::Notif(MuxNotification::ProgramStatusChanged { .. })) => {}
+             Ok(Item::Notif(MuxNotification::PaneRemoved(pane_id))) => {
+                 Pdu::PaneRemoved(codec::PaneRemoved { pane_id })
+                     .encode_async(&mut stream, 0)
+diff --git a/docs/config/lua/pane/get_program_status.md b/docs/config/lua/pane/get_program_status.md
+new file mode 100644
+index 0000000..a087801
+--- /dev/null
++++ b/docs/config/lua/pane/get_program_status.md
+@@ -0,0 +1,54 @@
++# `pane:get_program_status()`
++
++Local OSC 7501 alpha API. This is not an upstream release guarantee.
++
++Returns an owned list of the pane's current Program Status Protocol records,
++sorted by task ID. The root ID is the empty string. An empty list means no
++records are currently stored, or this pane implementation does not expose them.
++
++Each record has `id` and `state`. State is one of `idle`, `working`, `done`,
++`blocked` or `error`. `clear` is a command and is never stored.
++
++Optional fields are omitted when absent:
++
++| Field | Meaning |
++| --- | --- |
++| `kind` | `permission`, `question` or `auth`, only with `blocked`. |
++| `progress` | Integer from 0 through 100 with `working` or `blocked`. Absence means no percentage was supplied. |
++| `app` | The report's explicit application identifier. |
++| `effective_app` | The explicit application identifier or its nearest-ancestor inherited value. |
++| `title` | Decoded UTF-8 label. |
++| `msg` | Decoded UTF-8 single-line message. |
++
++Every report replaces its entire record. Inherited application values are
++computed when the snapshot is read, so ancestor replacement and eviction take
++effect without rewriting children. Returned tables are copies; mutating them
++does not change the terminal's records. Numeric positions are not task IDs.
++
++```lua
++for _, record in ipairs(pane:get_program_status()) do
++  if record.state == 'blocked' then
++    wezterm.log_info(record.id, record.kind, record.msg)
++  end
++end
++```
++
++For synchronous title callbacks, use the same-shaped `program_status` field on
++[PaneInformation](../PaneInformation.md). The terminal notifies local GUI
++consumers when record content changes; an identical report still refreshes
++eviction recency without a separate status-change notification.
++
++Records survive alternate-screen switches and soft reset. Full reset removes
++all records. OSC 133 A and attached-process exit remove working and blocked
++records, retaining idle, done and error. This alpha retains finished records
++until replacement or clearing. It has no dismissal API.
++
++The current implementation exposes local panes. Remote WezTerm mux clients
++do not replicate these records. The headless terminal model can still parse
++reports and answer feature detection, which does not imply remote indicators.
++
++Program-supplied text is plain text. Do not interpret it as markup or infer
++state from message wording. A formatter should disarm invisible direction
++formatting before displaying text outside the terminal grid.
++
++Protocol reference: [Program Status Protocol](https://www.superlogical.com/rex/docs/build/program-status).
+diff --git a/term/src/program_status.rs b/term/src/program_status.rs
+new file mode 100644
+index 0000000..8d5cb55
+--- /dev/null
++++ b/term/src/program_status.rs
+@@ -0,0 +1,281 @@
++//! Terminal-owned OSC 7501 records. Validated input comes from the parser;
++//! GUI presentation and client acknowledgement are independent of this store.
++
++use std::collections::{HashMap, VecDeque};
++use wezterm_escape_parser::program_status::{Report, State};
++
++pub const MAX_RECORDS: usize = 256;
++
++/// An owned presentation snapshot. `app` preserves the report's explicit value;
++/// `effective_app` resolves inheritance without changing the stored report.
++#[derive(Debug, Clone, PartialEq, Eq, serde::Serialize)]
++pub struct ProgramStatusRecord {
++    pub id: String,
++    pub state: String,
++    #[serde(skip_serializing_if = "Option::is_none")]
++    pub kind: Option<String>,
++    #[serde(skip_serializing_if = "Option::is_none")]
++    pub progress: Option<u8>,
++    #[serde(skip_serializing_if = "Option::is_none")]
++    pub app: Option<String>,
++    #[serde(skip_serializing_if = "Option::is_none")]
++    pub title: Option<String>,
++    #[serde(skip_serializing_if = "Option::is_none")]
++    pub msg: Option<String>,
++    #[serde(skip_serializing_if = "Option::is_none")]
++    pub effective_app: Option<String>,
++}
++
++#[derive(Debug, Default)]
++pub struct ProgramStatusStore {
++    records: HashMap<String, Report>,
++    // Oldest update first. Updating an identical report still refreshes recency.
++    recency: VecDeque<String>,
++    // The child waiter may signal exit before buffered PTY output is applied.
++    // Late finished reports are useful, but transient reports must not revive
++    // work after the attached process has already exited.
++    attached_process_exited: bool,
++}
++
++impl ProgramStatusStore {
++    /// Returns whether stored report content changed, separately from recency.
++    pub fn apply(&mut self, report: Report) -> bool {
++        if report.state == State::Clear {
++            return self.clear(&report.id);
++        }
++        if self.attached_process_exited && matches!(report.state, State::Working | State::Blocked) {
++            return false;
++        }
++        let changed = self.records.get(&report.id) != Some(&report);
++        self.recency.retain(|id| id != &report.id);
++        if !self.records.contains_key(&report.id) && self.records.len() == MAX_RECORDS {
++            if let Some(oldest) = self.recency.pop_front() {
++                self.records.remove(&oldest);
++            }
++        }
++        self.recency.push_back(report.id.clone());
++        self.records.insert(report.id.clone(), report);
++        changed
++    }
++
++    /// Clear this exact id and its descendants, respecting path boundaries.
++    pub fn clear(&mut self, id: &str) -> bool {
++        let before = self.records.len();
++        self.records.retain(|key, _| !is_at_or_below(key, id));
++        self.recency.retain(|key| !is_at_or_below(key, id));
++        before != self.records.len()
++    }
++
++    /// Called for a new shell prompt or exit of the attached process.
++    /// Idle records are retained, as allowed by the specification.
++    pub fn finish_command(&mut self) -> bool {
++        let before = self.records.len();
++        self.records
++            .retain(|_, record| !matches!(record.state, State::Working | State::Blocked));
++        let records = &self.records;
++        self.recency.retain(|id| records.contains_key(id));
++        before != self.records.len()
++    }
++
++    pub fn process_exited(&mut self) -> bool {
++        self.attached_process_exited = true;
++        self.finish_command()
++    }
++
++    /// Raw records in stable id order. Missing app values remain missing here;
++    /// consumers can resolve inheritance with `effective_app`.
++    pub fn snapshot(&self) -> Vec<Report> {
++        let mut records: Vec<_> = self.records.values().cloned().collect();
++        records.sort_by(|a, b| a.id.cmp(&b.id));
++        records
++    }
++
++    pub fn presentation_snapshot(&self) -> Vec<ProgramStatusRecord> {
++        use wezterm_escape_parser::program_status::Kind;
++        self.snapshot()
++            .into_iter()
++            .map(|record| ProgramStatusRecord {
++                effective_app: self.effective_app(&record.id).map(str::to_owned),
++                id: record.id,
++                state: match record.state {
++                    State::Idle => "idle",
++                    State::Working => "working",
++                    State::Done => "done",
++                    State::Blocked => "blocked",
++                    State::Error => "error",
++                    State::Clear => unreachable!("clear is never stored"),
++                }
++                .to_owned(),
++                kind: record.kind.map(|kind| {
++                    match kind {
++                        Kind::Permission => "permission",
++                        Kind::Question => "question",
++                        Kind::Auth => "auth",
++                    }
++                    .to_owned()
++                }),
++                progress: record.progress,
++                app: record.app,
++                title: record.title,
++                msg: record.message,
++            })
++            .collect()
++    }
++
++    /// Resolve app dynamically so parent replacement and clearing take effect.
++    pub fn effective_app(&self, id: &str) -> Option<&str> {
++        self.records.get(id)?;
++        let mut ancestor = id;
++        loop {
++            if let Some(app) = self.records.get(ancestor).and_then(|r| r.app.as_deref()) {
++                return Some(app);
++            }
++            if ancestor.is_empty() {
++                return None;
++            }
++            ancestor = ancestor
++                .rsplit_once('/')
++                .map(|(parent, _)| parent)
++                .unwrap_or("");
++        }
++    }
++}
++
++fn is_at_or_below(candidate: &str, ancestor: &str) -> bool {
++    ancestor.is_empty()
++        || candidate == ancestor
++        || candidate
++            .strip_prefix(ancestor)
++            .is_some_and(|suffix| suffix.starts_with('/'))
++}
++
++#[cfg(test)]
++mod tests {
++    use super::*;
++    use wezterm_escape_parser::program_status::Command;
++
++    fn report(body: &str) -> Report {
++        match Command::parse_body(body.as_bytes()).unwrap() {
++            Command::Report(report) => report,
++            _ => panic!("expected a report"),
++        }
++    }
++
++    #[test]
++    fn program_status_replaces_the_complete_record() {
++        let mut store = ProgramStatusStore::default();
++        assert!(store.apply(report("state=working:app=cargo:progress=40")));
++        assert!(store.apply(report("state=done")));
++        let records = store.snapshot();
++        assert_eq!(records.len(), 1);
++        assert_eq!(records[0].state, State::Done);
++        assert_eq!(records[0].app, None);
++        assert_eq!(records[0].progress, None);
++    }
++
++    #[test]
++    fn program_status_subtree_clearing_respects_boundaries() {
++        let mut store = ProgramStatusStore::default();
++        for id in ["", "build", "build/test", "builder/test"] {
++            let mut r = report("state=working");
++            r.id = id.to_owned();
++            store.apply(r);
++        }
++        assert!(store.apply(report("state=clear:id=build")));
++        assert_eq!(
++            store
++                .snapshot()
++                .iter()
++                .map(|r| r.id.as_str())
++                .collect::<Vec<_>>(),
++            ["", "builder/test"]
++        );
++        assert!(!store.clear("absent"));
++        assert!(store.apply(report("state=clear")));
++        assert!(store.snapshot().is_empty());
++    }
++
++    #[test]
++    fn program_status_inherits_from_nearest_existing_ancestor() {
++        let mut store = ProgramStatusStore::default();
++        store.apply(report("state=working:app=root"));
++        store.apply(report("state=working:id=build:app=cargo"));
++        store.apply(report("state=blocked:id=build/missing/test"));
++        assert_eq!(store.effective_app("build/missing/test"), Some("cargo"));
++        store.apply(report("state=working:id=build"));
++        assert_eq!(store.effective_app("build/missing/test"), Some("root"));
++        store.apply(report("state=idle"));
++        assert_eq!(store.effective_app("build/missing/test"), None);
++        assert_eq!(store.effective_app("absent"), None);
++    }
++
++    #[test]
++    fn program_status_prompt_and_exit_keep_finished_records() {
++        let mut store = ProgramStatusStore::default();
++        for (id, state) in [
++            ("a", "working"),
++            ("b", "blocked"),
++            ("c", "done"),
++            ("d", "error"),
++            ("e", "idle"),
++        ] {
++            store.apply(report(&format!("state={state}:id={id}")));
++        }
++        assert!(store.finish_command());
++        assert_eq!(
++            store.snapshot().iter().map(|r| r.state).collect::<Vec<_>>(),
++            [State::Done, State::Error, State::Idle]
++        );
++        assert!(!store.finish_command());
++    }
++
++    #[test]
++    fn program_status_evicts_oldest_update_including_identical_refreshes() {
++        let mut store = ProgramStatusStore::default();
++        for n in 0..MAX_RECORDS {
++            store.apply(report(&format!("state=working:id=task{n}")));
++        }
++        assert!(!store.apply(report("state=working:id=task0")));
++        assert!(store.apply(report("state=working:id=new")));
++        assert_eq!(store.snapshot().len(), MAX_RECORDS);
++        assert!(store.records.contains_key("task0"));
++        assert!(!store.records.contains_key("task1"));
++        store.clear("task0");
++        store.apply(report("state=done:id=after-clear"));
++        assert_eq!(store.snapshot().len(), MAX_RECORDS);
++    }
++
++    #[test]
++    fn program_status_presentation_snapshot_is_owned_and_resolves_inheritance() {
++        let mut store = ProgramStatusStore::default();
++        store.apply(report("state=working:app=cargo"));
++        store.apply(report("state=blocked:id=build/test:kind=permission"));
++        let mut snapshot = store.presentation_snapshot();
++        assert_eq!(snapshot[1].id, "build/test");
++        assert_eq!(snapshot[1].app, None);
++        assert_eq!(snapshot[1].effective_app.as_deref(), Some("cargo"));
++        assert_eq!(snapshot[1].state, "blocked");
++        assert_eq!(snapshot[1].kind.as_deref(), Some("permission"));
++        snapshot[1].state = "done".to_owned();
++        snapshot.clear();
++        assert_eq!(store.presentation_snapshot()[1].state, "blocked");
++    }
++
++    #[test]
++    fn program_status_ancestor_eviction_updates_existing_child_inheritance() {
++        let mut store = ProgramStatusStore::default();
++        store.apply(report("state=idle:app=old-root"));
++        store.apply(report("state=blocked:id=child"));
++        for n in 0..MAX_RECORDS - 2 {
++            store.apply(report(&format!("state=idle:id=task{n}")));
++        }
++        assert_eq!(store.effective_app("child"), Some("old-root"));
++        // Root is the least recently updated record. Its eviction must also
++        // change the derived app on surviving children without a child report.
++        store.apply(report("state=idle:id=overflow"));
++        assert_eq!(store.effective_app("child"), None);
++        let snapshot = store.presentation_snapshot();
++        let child = snapshot.iter().find(|record| record.id == "child").unwrap();
++        assert_eq!(child.effective_app, None);
++    }
++}
+diff --git a/term/src/test/program_status.rs b/term/src/test/program_status.rs
+new file mode 100644
+index 0000000..ef3c90f
+--- /dev/null
++++ b/term/src/test/program_status.rs
+@@ -0,0 +1,319 @@
++//! Exercise OSC 7501 through the real terminal input and lifecycle entry points.
++
++use super::*;
++use crate::program_status::ProgramStatusRecord;
++use k9::assert_equal as assert_eq;
++use std::io::{self, Write};
++use std::sync::atomic::{AtomicUsize, Ordering};
++use std::sync::mpsc::{self, Receiver, Sender};
++use std::time::{Duration, Instant};
++
++fn report(term: &mut TestTerm, body: &str) {
++    term.print(format!("\x1b]7501;{}\x1b\\", body));
++}
++
++fn record(term: &TestTerm, id: &str) -> ProgramStatusRecord {
++    term.get_program_status_records()
++        .into_iter()
++        .find(|record| record.id == id)
++        .unwrap_or_else(|| panic!("missing program status record {:?}", id))
++}
++
++fn ids(term: &TestTerm) -> Vec<String> {
++    term.get_program_status_records()
++        .into_iter()
++        .map(|record| record.id)
++        .collect()
++}
++
++#[test]
++fn program_status_fragmented_reports_accept_bel_and_st() {
++    for terminator in ["\x07", "\x1b\\"] {
++        let mut term = TestTerm::new(3, 80, 0);
++        let sequence = format!(
++            "\x1b]7501;state=blocked:id=build/test:kind=question:progress=42:\
++             app=cargo:title=VGVzdHM=:msg=Q29uZmlybT8={}",
++            terminator
++        );
++        // Split every byte, including ESC and the final ST backslash. An
++        // otherwise valid incomplete OSC must not expose a partial record.
++        let bytes = sequence.as_bytes();
++        for byte in &bytes[..bytes.len() - 1] {
++            term.print([*byte]);
++            assert!(term.get_program_status_records().is_empty());
++        }
++        term.print([bytes[bytes.len() - 1]]);
++        let actual = record(&term, "build/test");
++        assert_eq!(actual.state, "blocked");
++        assert_eq!(actual.kind.as_deref(), Some("question"));
++        assert_eq!(actual.progress, Some(42));
++        assert_eq!(actual.app.as_deref(), Some("cargo"));
++        assert_eq!(actual.effective_app.as_deref(), Some("cargo"));
++        assert_eq!(actual.title.as_deref(), Some("Tests"));
++        assert_eq!(actual.msg.as_deref(), Some("Confirm?"));
++    }
++}
++
++#[test]
++fn program_status_invalid_reports_do_not_partially_replace_records() {
++    let mut term = TestTerm::new(3, 80, 0);
++    report(&mut term, "state=done:app=trusted:msg=UmVhZHk=");
++    let original = term.get_program_status_records();
++    let invalid = [
++        "app=other".to_owned(),
++        "state=future:app=other".to_owned(),
++        "state=working:id=:app=other".to_owned(),
++        "state=working:id=build//test:app=other".to_owned(),
++        "state=working:app=other:msg=YQ=".to_owned(),
++        "state=working:app=other:msg=Cg==".to_owned(),
++        "state=working:app=other:msg=/w==".to_owned(),
++        format!("state=working:app={}", "a".repeat(33)),
++        format!("state=working:{}=ignored", "a".repeat(17)),
++        format!("state=working:id={}", "a".repeat(33)),
++        format!("state=working:title={}", "a".repeat(257)),
++    ];
++    // Each rejected sequence contains enough valid data to corrupt the root
++    // if dispatch mutates stored fields before validating the whole report.
++    for body in invalid {
++        report(&mut term, &body);
++        assert_eq!(term.get_program_status_records(), original);
++    }
++    // A refused OSC must not poison parsing of the next valid report.
++    report(&mut term, "state=idle:app=recovered");
++    assert_eq!(record(&term, "").app.as_deref(), Some("recovered"));
++}
++
++#[test]
++fn program_status_replacement_removes_omitted_fields_and_updates_inheritance() {
++    let mut term = TestTerm::new(3, 80, 0);
++    report(
++        &mut term,
++        "state=working:app=cargo:progress=12:title=QnVpbGQ=:msg=UnVubmluZw==",
++    );
++    report(&mut term, "state=blocked:id=build/test:kind=permission");
++    assert_eq!(record(&term, "build/test").app, None);
++    assert_eq!(
++        record(&term, "build/test").effective_app.as_deref(),
++        Some("cargo")
++    );
++    // An absent intermediate parent does not break inheritance. A later parent
++    // changes the effective app without rewriting its children's reports.
++    report(&mut term, "state=idle:id=build:app=ninja");
++    assert_eq!(
++        record(&term, "build/test").effective_app.as_deref(),
++        Some("ninja")
++    );
++    report(&mut term, "state=idle:id=build");
++    assert_eq!(
++        record(&term, "build/test").effective_app.as_deref(),
++        Some("cargo")
++    );
++    report(&mut term, "state=idle");
++    let root = record(&term, "");
++    assert_eq!(root.app, None);
++    assert_eq!(root.progress, None);
++    assert_eq!(root.title, None);
++    assert_eq!(root.msg, None);
++    assert_eq!(record(&term, "build/test").effective_app, None);
++}
++
++#[test]
++fn program_status_clear_uses_path_boundaries_and_missing_parents() {
++    let mut term = TestTerm::new(3, 80, 0);
++    for id in ["build/test", "build/test/unit", "builder", "build-two/test"] {
++        report(&mut term, &format!("state=done:id={}", id));
++    }
++    // `build` itself is absent. Clearing it still removes descendants, but not
++    // IDs that merely share the same byte prefix.
++    report(&mut term, "state=clear:id=build");
++    assert_eq!(ids(&term), vec!["build-two/test", "builder"]);
++    report(&mut term, "state=clear:id=absent");
++    assert_eq!(ids(&term), vec!["build-two/test", "builder"]);
++    report(&mut term, "state=clear");
++    assert!(term.get_program_status_records().is_empty());
++}
++
++#[test]
++fn program_status_osc_133_a_cleans_transients_but_p_does_not() {
++    let mut term = TestTerm::new(3, 80, 0);
++    for state in ["working", "blocked", "done", "error", "idle"] {
++        report(&mut term, &format!("state={0}:id={0}", state));
++    }
++    let original = term.get_program_status_records();
++    // OSC 133 P is named StartPrompt in the parser. The required lifetime event
++    // is OSC 133 A, named FreshLineAndStartPrompt instead.
++    term.print(b"\x1b]133;P\x1b\\");
++    assert_eq!(term.get_program_status_records(), original);
++    term.print(b"\x1b]133;A\x07");
++    assert_eq!(ids(&term), vec!["done", "error", "idle"]);
++    term.print(b"\x1b]133;A\x1b\\");
++    assert_eq!(ids(&term), vec!["done", "error", "idle"]);
++    // A prompt ends one command, not the attached shell.
++    report(&mut term, "state=working:id=next-command");
++    assert_eq!(record(&term, "next-command").state, "working");
++}
++
++#[test]
++fn program_status_full_reset_clears_but_soft_reset_and_screen_changes_preserve() {
++    let mut term = TestTerm::new(3, 80, 0);
++    report(&mut term, "state=blocked:app=cargo:kind=auth");
++    report(&mut term, "state=done:id=tests");
++    let original = term.get_program_status_records();
++    term.print(b"\x1b[?1049h");
++    assert_eq!(term.get_program_status_records(), original);
++    term.print(b"\x1b[!p");
++    assert_eq!(term.get_program_status_records(), original);
++    term.print(b"\x1b[?1049l");
++    assert_eq!(term.get_program_status_records(), original);
++    term.print(b"\x1bc");
++    assert!(term.get_program_status_records().is_empty());
++    report(&mut term, "state=working:app=after-reset");
++    assert_eq!(record(&term, "").state, "working");
++}
++
++struct CountChanges(Arc<AtomicUsize>);
++
++impl AlertHandler for CountChanges {
++    fn alert(&mut self, _alert: Alert) {}
++
++    fn program_status_changed(&mut self) {
++        self.0.fetch_add(1, Ordering::SeqCst);
++    }
++}
++
++#[test]
++fn program_status_change_callback_tracks_visible_mutations() {
++    let mut term = TestTerm::new(3, 80, 0);
++    let changes = Arc::new(AtomicUsize::new(0));
++    term.set_notification_handler(Box::new(CountChanges(Arc::clone(&changes))));
++    report(&mut term, "state=working:app=cargo");
++    assert_eq!(changes.load(Ordering::SeqCst), 1);
++    report(&mut term, "state=working:app=cargo");
++    report(&mut term, "state=clear:id=absent");
++    assert_eq!(changes.load(Ordering::SeqCst), 1);
++    report(&mut term, "state=done:id=tests");
++    assert_eq!(changes.load(Ordering::SeqCst), 2);
++    term.print(b"\x1b]133;A\x1b\\");
++    assert_eq!(changes.load(Ordering::SeqCst), 3);
++    term.print(b"\x1b]133;A\x1b\\");
++    assert_eq!(changes.load(Ordering::SeqCst), 3);
++    term.print(b"\x1bc");
++    assert_eq!(changes.load(Ordering::SeqCst), 4);
++    term.print(b"\x1bc");
++    assert_eq!(changes.load(Ordering::SeqCst), 4);
++}
++
++#[test]
++fn program_status_process_exit_cleans_transients_and_preserves_results() {
++    let mut term = TestTerm::new(3, 80, 0);
++    for state in ["working", "blocked", "done", "error", "idle"] {
++        report(&mut term, &format!("state={0}:id={0}", state));
++    }
++    // The process owner calls this even if the pane remains visible. Screen
++    // destruction must not be needed for correct record lifetime.
++    term.program_status_process_exited();
++    assert_eq!(ids(&term), vec!["done", "error", "idle"]);
++    term.program_status_process_exited();
++    assert_eq!(ids(&term), vec!["done", "error", "idle"]);
++}
++
++#[test]
++fn program_status_exit_before_buffer_drain_does_not_revive_work() {
++    let mut term = TestTerm::new(3, 80, 0);
++    term.program_status_process_exited();
++    // The waiter can finish before the parser applies the child's final bytes.
++    // Finished results are useful; transient work must not be revived.
++    report(&mut term, "state=working:id=late-work");
++    report(&mut term, "state=blocked:id=late-question:kind=permission");
++    report(&mut term, "state=done:id=late-result");
++    report(&mut term, "state=error:id=late-failure");
++    assert_eq!(ids(&term), vec!["late-failure", "late-result"]);
++    // Resetting the display does not restart an already-exited process.
++    term.print(b"\x1bc");
++    report(&mut term, "state=working:id=still-exited");
++    assert!(term.get_program_status_records().is_empty());
++}
++
++#[test]
++fn program_status_snapshots_are_owned_copies() {
++    let mut term = TestTerm::new(3, 80, 0);
++    report(&mut term, "state=working:app=cargo:msg=UnVubmluZw==");
++    let mut copy = term.get_program_status_records();
++    copy[0].app = Some("changed-by-caller".to_owned());
++    copy[0].id = "changed-id".to_owned();
++    assert_eq!(record(&term, "").app.as_deref(), Some("cargo"));
++    assert_eq!(record(&term, "").msg.as_deref(), Some("Running"));
++    report(&mut term, "state=clear");
++    assert!(term.get_program_status_records().is_empty());
++    assert_eq!(copy[0].state, "working");
++    assert_eq!(copy[0].msg.as_deref(), Some("Running"));
++}
++
++struct QueryWriter(Sender<Vec<u8>>);
++
++impl Write for QueryWriter {
++    fn write(&mut self, bytes: &[u8]) -> io::Result<usize> {
++        self.0
++            .send(bytes.to_vec())
++            .map_err(|_| io::Error::from(io::ErrorKind::BrokenPipe))?;
++        Ok(bytes.len())
++    }
++
++    fn flush(&mut self) -> io::Result<()> {
++        Ok(())
++    }
++}
++
++fn receive_bytes(receiver: &Receiver<Vec<u8>>, expected_length: usize) -> Vec<u8> {
++    let deadline = Instant::now() + Duration::from_secs(10);
++    let mut result = Vec::new();
++    while result.len() < expected_length {
++        let remaining = deadline
++            .checked_duration_since(Instant::now())
++            .expect("terminal writer did not produce the capability response in time");
++        result.extend(
++            receiver
++                .recv_timeout(remaining)
++                .expect("terminal writer did not produce the capability response"),
++        );
++    }
++    result
++}
++
++#[test]
++fn program_status_only_queries_write_the_fixed_capability_reply() {
++    let (sender, receiver) = mpsc::channel();
++    let mut term = Terminal::new(
++        TerminalSize {
++            rows: 3,
++            cols: 80,
++            pixel_width: 640,
++            pixel_height: 48,
++            dpi: 0,
++        },
++        Arc::new(TestTermConfig { scrollback: 0 }),
++        "WezTerm",
++        "test",
++        Box::new(QueryWriter(sender)),
++    );
++    let reply =
++        b"\x1b]7501;?:states=idle,working,done,blocked,error:kinds=permission,question,auth\x1b\\";
++    term.advance_bytes(b"\x1b]7501;?\x07");
++    assert_eq!(
++        receive_bytes(&receiver, reply.len()).as_slice(),
++        reply.as_slice()
++    );
++    assert!(term.get_program_status_records().is_empty());
++    // The second query is an ordering barrier for the asynchronous writer.
++    // Any response to the report would precede this fixed response.
++    term.advance_bytes(b"\x1b]7501;state=blocked:app=private:msg=U2VjcmV0\x1b\\");
++    term.advance_bytes(b"\x1b]7501;?\x1b\\");
++    assert_eq!(
++        receive_bytes(&receiver, reply.len()).as_slice(),
++        reply.as_slice()
++    );
++    assert_eq!(
++        term.get_program_status_records()[0].msg.as_deref(),
++        Some("Secret")
++    );
++}
+diff --git a/wezterm-escape-parser/src/program_status.rs b/wezterm-escape-parser/src/program_status.rs
+new file mode 100644
+index 0000000..464c7e7
+--- /dev/null
++++ b/wezterm-escape-parser/src/program_status.rs
+@@ -0,0 +1,566 @@
++//! Validated, owned reports for the OSC 7501 Program Status Protocol.
++//!
++//! This module parses one body at a time. Record storage and lifetime rules
++//! belong to the terminal model, independently of escape-sequence framing.
++
++use crate::allocate::*;
++use base64::Engine;
++use base64::engine::general_purpose::{STANDARD, STANDARD_NO_PAD};
++use core::fmt::{Display, Formatter, Result as FmtResult};
++
++pub const MAX_SEQUENCE_BYTES: usize = 4096;
++// Reserve the longer terminator, including for BEL-terminated input.
++pub const MAX_BODY_BYTES: usize = MAX_SEQUENCE_BYTES - b"\x1b]7501;".len() - b"\x1b\\".len();
++pub const MAX_MESSAGE_BYTES: usize = 2048;
++pub const MAX_TITLE_BYTES: usize = 192;
++pub const MAX_ID_BYTES: usize = 128;
++pub const SUPPORT_REPLY: &[u8] =
++    b"\x1b]7501;?:states=idle,working,done,blocked,error:kinds=permission,question,auth\x1b\\";
++
++#[derive(Debug, Clone, Copy, PartialEq, Eq)]
++pub enum State {
++    Idle,
++    Working,
++    Done,
++    Blocked,
++    Error,
++    Clear,
++}
++
++#[derive(Debug, Clone, Copy, PartialEq, Eq)]
++pub enum Kind {
++    Permission,
++    Question,
++    Auth,
++}
++
++#[derive(Debug, Clone, PartialEq, Eq)]
++pub struct Report {
++    pub state: State,
++    /// Empty means the root record. An explicitly empty wire id is invalid.
++    pub id: String,
++    pub kind: Option<Kind>,
++    pub progress: Option<u8>,
++    pub app: Option<String>,
++    pub title: Option<String>,
++    pub message: Option<String>,
++}
++
++#[derive(Debug, Clone, PartialEq, Eq)]
++pub enum Command {
++    Query,
++    Report(Report),
++}
++
++#[derive(Debug, Clone, Copy, PartialEq, Eq)]
++pub enum ParseError {
++    TooLong,
++    InvalidState,
++    InvalidId,
++    InvalidText,
++}
++
++impl Command {
++    /// Parse the bytes following `7501;`, excluding the terminator.
++    /// No partial report escapes this function: validate before changing state.
++    pub fn parse_body(body: &[u8]) -> core::result::Result<Self, ParseError> {
++        if body.len() > MAX_BODY_BYTES {
++            return Err(ParseError::TooLong);
++        }
++        if body == b"?" {
++            return Ok(Self::Query);
++        }
++
++        let mut state = None;
++        let mut id = None;
++        let mut kind = None;
++        let mut progress = None;
++        let mut app = None;
++        let mut title = None;
++        let mut message = None;
++
++        for pair in body.split(|b| *b == b':') {
++            let Some(eq) = pair.iter().position(|b| *b == b'=') else {
++                continue;
++            };
++            let key = pair[..eq].trim_ascii();
++            let value = pair[eq + 1..].trim_ascii();
++            if key.len() > 16 {
++                return Err(ParseError::TooLong);
++            }
++            if key.is_empty() || !key.iter().all(u8::is_ascii_lowercase) {
++                continue;
++            }
++
++            // Limits apply even to an overwritten or otherwise malformed pair.
++            // An invalid explicit id must never turn into an absent/root id.
++            match key {
++                b"id" => validate_id(value)?,
++                b"app" => check_len(value.len(), 32)?,
++                b"title" => check_len(value.len(), 256)?,
++                b"msg" => check_len(value.len(), 2732)?,
++                _ => {}
++            }
++            if !value.iter().all(|b| is_name_byte(*b) || b",/=".contains(b)) {
++                continue;
++            }
++
++            // Check every occurrence's limits, including overwritten values.
++            match key {
++                b"state" => state = Some(value),
++                b"id" => id = Some(value),
++                b"kind" => kind = Some(value),
++                b"progress" => progress = Some(value),
++                b"app" => app = Some(value),
++                b"title" => {
++                    title = Some(decode_text(value, MAX_TITLE_BYTES)?);
++                }
++                b"msg" => {
++                    message = Some(decode_text(value, MAX_MESSAGE_BYTES)?);
++                }
++                _ => {}
++            }
++        }
++
++        let state = match state {
++            Some(b"idle") => State::Idle,
++            Some(b"working") => State::Working,
++            Some(b"done") => State::Done,
++            Some(b"blocked") => State::Blocked,
++            Some(b"error") => State::Error,
++            Some(b"clear") => State::Clear,
++            _ => return Err(ParseError::InvalidState),
++        };
++        let kind = if state == State::Blocked {
++            match kind {
++                Some(b"permission") => Some(Kind::Permission),
++                Some(b"question") => Some(Kind::Question),
++                Some(b"auth") => Some(Kind::Auth),
++                _ => None,
++            }
++        } else {
++            None
++        };
++        let progress = if matches!(state, State::Working | State::Blocked) {
++            progress.and_then(parse_progress)
++        } else {
++            None
++        };
++
++        Ok(Self::Report(Report {
++            state,
++            id: ascii_string(id.unwrap_or(b"")),
++            kind,
++            progress,
++            app: app
++                .filter(|v| !v.is_empty() && v.iter().all(|b| is_name_byte(*b)))
++                .map(ascii_string),
++            title,
++            message,
++        }))
++    }
++}
++
++fn check_len(len: usize, max: usize) -> core::result::Result<(), ParseError> {
++    if len > max {
++        Err(ParseError::TooLong)
++    } else {
++        Ok(())
++    }
++}
++
++fn is_name_byte(b: u8) -> bool {
++    b.is_ascii_alphanumeric() || b"_.+-".contains(&b)
++}
++
++fn ascii_string(value: &[u8]) -> String {
++    // Callers only pass bytes already checked against the ASCII alphabet.
++    core::str::from_utf8(value)
++        .expect("validated ASCII")
++        .to_owned()
++}
++
++fn validate_id(value: &[u8]) -> core::result::Result<(), ParseError> {
++    check_len(value.len(), MAX_ID_BYTES)?;
++    let mut depth = 0;
++    for segment in value.split(|b| *b == b'/') {
++        depth += 1;
++        check_len(depth, 8)?;
++        check_len(segment.len(), 32)?;
++        if segment.is_empty() || !segment.iter().all(|b| is_name_byte(*b)) {
++            return Err(ParseError::InvalidId);
++        }
++    }
++    Ok(())
++}
++
++fn parse_progress(value: &[u8]) -> Option<u8> {
++    if value.is_empty() || !value.iter().all(u8::is_ascii_digit) {
++        return None;
++    }
++    let n = core::str::from_utf8(value).ok()?.parse::<u8>().ok()?;
++    (n <= 100).then_some(n)
++}
++
++fn decode_text(value: &[u8], max: usize) -> core::result::Result<String, ParseError> {
++    let engine = if value.ends_with(b"=") {
++        &STANDARD
++    } else {
++        &STANDARD_NO_PAD
++    };
++    let decoded = engine.decode(value).map_err(|_| ParseError::InvalidText)?;
++    check_len(decoded.len(), max)?;
++    let text = String::from_utf8(decoded).map_err(|_| ParseError::InvalidText)?;
++    if text.chars().any(char::is_control) {
++        return Err(ParseError::InvalidText);
++    }
++    Ok(text)
++}
++
++#[cfg(test)]
++mod tests {
++    use super::*;
++    use crate::parser::Parser;
++    use crate::{Action, OperatingSystemCommand};
++    #[cfg(not(feature = "std"))]
++    use alloc::{format, vec};
++
++    fn report(body: &[u8]) -> Report {
++        match Command::parse_body(body).unwrap() {
++            Command::Report(report) => report,
++            Command::Query => panic!("expected report"),
++        }
++    }
++
++    #[test]
++    fn program_status_query_and_states() {
++        assert_eq!(Command::parse_body(b"?"), Ok(Command::Query));
++        for (name, state) in [
++            ("idle", State::Idle),
++            ("working", State::Working),
++            ("done", State::Done),
++            ("blocked", State::Blocked),
++            ("error", State::Error),
++            ("clear", State::Clear),
++        ] {
++            assert_eq!(report(format!("state={name}").as_bytes()).state, state);
++        }
++        for body in [b"".as_slice(), b"app=cargo", b"state=unknown", b"state="] {
++            assert_eq!(Command::parse_body(body), Err(ParseError::InvalidState));
++        }
++    }
++
++    #[test]
++    fn program_status_all_fields_and_owned_text() {
++        let mut input = b"state=blocked:kind=permission:id=build/test:progress=42:app=cargo:title=UGxhbg:msg=QXBwcm92ZT8=".to_vec();
++        let record = report(&input);
++        input.fill(b'x');
++        assert_eq!(record.state, State::Blocked);
++        assert_eq!(record.kind, Some(Kind::Permission));
++        assert_eq!(record.progress, Some(42));
++        assert_eq!(record.id, "build/test");
++        assert_eq!(record.app.as_deref(), Some("cargo"));
++        assert_eq!(record.title.as_deref(), Some("Plan"));
++        assert_eq!(record.message.as_deref(), Some("Approve?"));
++    }
++
++    #[test]
++    fn program_status_pairs_are_forgiving_and_last_value_wins() {
++        let record = report(b" state = working :oops:future=yes:progress=1:progress=80:app=old:app=new:bad=\xff:kind=question");
++        assert_eq!(record.progress, Some(80));
++        assert_eq!(record.app.as_deref(), Some("new"));
++        assert_eq!(record.kind, None);
++        assert_eq!(report(b"state=done:progress=40:kind=auth").progress, None);
++        assert_eq!(report(b"state=blocked:kind=future").kind, None);
++        assert_eq!(report(b"state=idle:app=bad/name").app, None);
++    }
++
++    #[test]
++    fn program_status_progress_validation() {
++        for value in ["", "101", "300", "-1", "1.0", "1_0", "unknown"] {
++            assert_eq!(
++                report(format!("state=working:progress={value}").as_bytes()).progress,
++                None
++            );
++        }
++        assert_eq!(report(b"state=blocked:progress=0").progress, Some(0));
++        assert_eq!(report(b"state=working:progress=100").progress, Some(100));
++    }
++
++    #[test]
++    fn program_status_ids_never_fall_back_to_root() {
++        for id in [
++            "", "/a", "a/", "a//b", "a,b", "a=b", "bad@id", "bad id", "é", "bad\0id",
++        ] {
++            assert_eq!(
++                Command::parse_body(format!("state=clear:id={id}").as_bytes()),
++                Err(ParseError::InvalidId)
++            );
++        }
++        assert_eq!(report(b"state=clear").id, "");
++        assert_eq!(report(b"state=working:id=A_b.+-1/test").id, "A_b.+-1/test");
++        assert_eq!(
++            Command::parse_body(b"state=idle:id=bad//id:id=good"),
++            Err(ParseError::InvalidId)
++        );
++        let too_deep = "a/".repeat(8) + "a";
++        assert_eq!(
++            Command::parse_body(format!("state=idle:id={too_deep}").as_bytes()),
++            Err(ParseError::TooLong)
++        );
++        assert_eq!(
++            Command::parse_body(format!("state=idle:id={}", "a".repeat(33)).as_bytes()),
++            Err(ParseError::TooLong)
++        );
++    }
++
++    #[test]
++    fn program_status_invalid_text_discards_report() {
++        for bytes in [
++            b"line\n".as_slice(),
++            b"tab\t",
++            b"\x1b[31m",
++            b"\xff",
++            "\u{85}".as_bytes(),
++        ] {
++            let encoded = STANDARD.encode(bytes);
++            assert_eq!(
++                Command::parse_body(format!("state=working:msg={encoded}").as_bytes()),
++                Err(ParseError::InvalidText)
++            );
++        }
++        assert_eq!(
++            Command::parse_body(b"state=working:msg=abcde"),
++            Err(ParseError::InvalidText)
++        );
++        let encoded = STANDARD_NO_PAD.encode("部署中");
++        assert_eq!(
++            report(format!("state=working:msg={encoded}").as_bytes())
++                .message
++                .as_deref(),
++            Some("部署中")
++        );
++        assert_eq!(report(b"state=idle:msg=").message.as_deref(), Some(""));
++    }
++
++    #[test]
++    fn program_status_limits_apply_before_any_report_is_returned() {
++        assert!(
++            Command::parse_body(
++                format!("state=idle:future={}", "x".repeat(MAX_BODY_BYTES - 18)).as_bytes()
++            )
++            .is_ok()
++        );
++        assert_eq!(
++            Command::parse_body(&vec![b'x'; MAX_BODY_BYTES + 1]),
++            Err(ParseError::TooLong)
++        );
++        assert_eq!(
++            Command::parse_body(format!("state=idle:{}=x", "x".repeat(17)).as_bytes()),
++            Err(ParseError::TooLong)
++        );
++        assert_eq!(
++            Command::parse_body(format!("state=idle:app={}:app=ok", "x".repeat(33)).as_bytes()),
++            Err(ParseError::TooLong)
++        );
++        for (key, max) in [("msg", MAX_MESSAGE_BYTES), ("title", MAX_TITLE_BYTES)] {
++            let text = "x".repeat(max);
++            assert!(
++                Command::parse_body(
++                    format!("state=idle:{key}={}", STANDARD.encode(&text)).as_bytes()
++                )
++                .is_ok()
++            );
++            assert_eq!(
++                Command::parse_body(
++                    format!("state=idle:{key}={}", STANDARD.encode(text + "x")).as_bytes()
++                ),
++                Err(ParseError::TooLong)
++            );
++        }
++    }
++
++    #[test]
++    fn program_status_overwritten_fields_still_require_validation() {
++        for body in [
++            b"state=done:msg=abcde:msg=b2s=".as_slice(),
++            b"state=done:title=Cg==:title=b2s=",
++        ] {
++            assert_eq!(Command::parse_body(body), Err(ParseError::InvalidText));
++        }
++        assert_eq!(
++            Command::parse_body(b"state=clear:id=bad%id"),
++            Err(ParseError::InvalidId)
++        );
++        assert_eq!(
++            Command::parse_body(format!("state=done:app={}", "%".repeat(33)).as_bytes()),
++            Err(ParseError::TooLong)
++        );
++    }
++
++    #[test]
++    fn program_status_osc_framing_and_encoding() {
++        for terminator in ["\x07", "\x1b\\"] {
++            let mut parser = Parser::new();
++            let query = parser.parse_as_vec(format!("\x1b]7501;?{terminator}").as_bytes());
++            assert_eq!(
++                query,
++                vec![Action::OperatingSystemCommand(Box::new(
++                    OperatingSystemCommand::ProgramStatus(Command::Query)
++                ))]
++            );
++            assert_eq!(format!("{}", query[0]), "\x1b]7501;?\x1b\\");
++
++            let command = Command::parse_body(b"state=blocked:id=build/test:kind=question:progress=42:app=cargo:title=UGxhbg:msg=QXBwcm92ZT8=").unwrap();
++            let osc = OperatingSystemCommand::ProgramStatus(command.clone());
++            let encoded = format!("{osc}");
++            let actions = parser.parse_as_vec(encoded.as_bytes());
++            assert_eq!(actions, vec![Action::OperatingSystemCommand(Box::new(osc))]);
++            assert_eq!(
++                encoded,
++                "\x1b]7501;state=blocked:id=build/test:kind=question:progress=42:app=cargo:title=UGxhbg==:msg=QXBwcm92ZT8=\x1b\\"
++            );
++        }
++    }
++
++    #[test]
++    fn program_status_fragmented_reports_require_complete_terminator() {
++        for wire in [
++            b"\x1b]7501;state=working:id=build:progress=5\x1b\\".as_slice(),
++            b"\x1b]7501;state=working:id=build:progress=5\x07",
++        ] {
++            let expected = Parser::new().parse_as_vec(wire);
++            assert_eq!(expected.len(), 1);
++            for split in 0..wire.len() {
++                let mut parser = Parser::new();
++                assert!(parser.parse_as_vec(&wire[..split]).is_empty());
++                assert_eq!(parser.parse_as_vec(&wire[split..]), expected);
++            }
++            let mut parser = Parser::new();
++            for byte in &wire[..wire.len() - 1] {
++                assert!(parser.parse_as_vec(&[*byte]).is_empty());
++            }
++            assert_eq!(parser.parse_as_vec(&wire[wire.len() - 1..]), expected);
++        }
++    }
++
++    #[test]
++    fn program_status_bad_reports_cannot_produce_valid_commands() {
++        for body in [
++            "state=working:msg=abcde",
++            "state=working:id=a//b",
++            "state=future",
++            "app=cargo",
++        ] {
++            let actions = Parser::new().parse_as_vec(format!("\x1b]7501;{body}\x07").as_bytes());
++            assert!(matches!(
++                &actions[..],
++                [Action::OperatingSystemCommand(osc)]
++                    if matches!(&**osc, OperatingSystemCommand::Unspecified(_))
++            ));
++        }
++    }
++
++    #[test]
++    fn program_status_malformed_semicolon_pair_is_skipped() {
++        let body = b"state=working:future=bad;value:progress=50";
++        let expected = Command::parse_body(body).unwrap();
++        let actions =
++            Parser::new().parse_as_vec(b"\x1b]7501;state=working:future=bad;value:progress=50\x07");
++        assert_eq!(
++            actions,
++            vec![Action::OperatingSystemCommand(Box::new(
++                OperatingSystemCommand::ProgramStatus(expected.clone())
++            ))]
++        );
++        assert_eq!(
++            OperatingSystemCommand::parse(&[
++                b"7501",
++                b"state=working:future=bad",
++                b"value:progress=50",
++            ]),
++            OperatingSystemCommand::ProgramStatus(expected)
++        );
++    }
++
++    #[test]
++    fn program_status_oversized_stream_is_discarded_and_parser_recovers() {
++        let mut parser = Parser::new();
++        let mut wire = b"\x1b]7501;state=working:future=".to_vec();
++        wire.extend_from_slice(&vec![b'x'; MAX_SEQUENCE_BYTES * 2]);
++        assert!(parser.parse_as_vec(&wire).is_empty());
++        assert!(parser.parse_as_vec(b"\x1b\\").is_empty());
++        assert_eq!(
++            parser.parse_as_vec(b"\x1b]7501;?\x07"),
++            vec![Action::OperatingSystemCommand(Box::new(
++                OperatingSystemCommand::ProgramStatus(Command::Query)
++            ))]
++        );
++    }
++
++    #[test]
++    fn program_status_raw_controls_do_not_manufacture_valid_values() {
++        for wire in [
++            b"\x1b]7501;state=wo\0rking\x07".as_slice(),
++            b"\x1b]7501;state=clear:id=bad\0id\x07",
++            b"\x1b]7501;state=clear:id=bad\x7fid\x07",
++        ] {
++            let actions = Parser::new().parse_as_vec(wire);
++            assert!(matches!(
++                &actions[..],
++                [Action::OperatingSystemCommand(osc)]
++                    if matches!(&**osc, OperatingSystemCommand::Unspecified(_))
++            ));
++        }
++        let actions =
++            Parser::new().parse_as_vec(b"\x1b]7501;state=working:future=x\0y:progress=5\x07");
++        assert!(matches!(
++            &actions[..],
++            [Action::OperatingSystemCommand(osc)]
++                if matches!(&**osc, OperatingSystemCommand::ProgramStatus(Command::Report(report))
++                    if report.progress == Some(5))
++        ));
++    }
++}
++
++/// Formats only the body; OperatingSystemCommand supplies OSC framing.
++impl Display for Command {
++    fn fmt(&self, f: &mut Formatter) -> FmtResult {
++        let Self::Report(report) = self else {
++            return f.write_str("?");
++        };
++        let state = match report.state {
++            State::Idle => "idle",
++            State::Working => "working",
++            State::Done => "done",
++            State::Blocked => "blocked",
++            State::Error => "error",
++            State::Clear => "clear",
++        };
++        write!(f, "state={state}")?;
++        if !report.id.is_empty() {
++            write!(f, ":id={}", report.id)?;
++        }
++        if let Some(kind) = report.kind {
++            let kind = match kind {
++                Kind::Permission => "permission",
++                Kind::Question => "question",
++                Kind::Auth => "auth",
++            };
++            write!(f, ":kind={kind}")?;
++        }
++        if let Some(progress) = report.progress {
++            write!(f, ":progress={progress}")?;
++        }
++        if let Some(app) = &report.app {
++            write!(f, ":app={app}")?;
++        }
++        if let Some(title) = &report.title {
++            write!(f, ":title={}", STANDARD.encode(title))?;
++        }
++        if let Some(message) = &report.message {
++            write!(f, ":msg={}", STANDARD.encode(message))?;
++        }
++        Ok(())
++    }
++}

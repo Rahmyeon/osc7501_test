@@ -1,0 +1,331 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Designing OSC 7501 in WezTerm: architecture and evidence</title>
+<style>
+:root{color-scheme:light;--bg:#f4f7fa;--paper:#ffffff;--ink:#172d3f;--muted:#35566d;--accent:#1f4f75;--line:#c9d7e2;--good:#155b42;--bad:#9f1d32;--warn:#774900}
+@media(prefers-color-scheme:dark){:root{color-scheme:dark;--bg:#101b24;--paper:#172733;--ink:#e8f1f8;--muted:#b5ccdc;--accent:#9ecbed;--line:#354e60;--good:#94dfbe;--bad:#ffbac5;--warn:#f6cc7d}}
+:root[data-theme="light"]{color-scheme:light;--bg:#f4f7fa;--paper:#ffffff;--ink:#172d3f;--muted:#35566d;--accent:#1f4f75;--line:#c9d7e2;--good:#155b42;--bad:#9f1d32;--warn:#774900}
+:root[data-theme="dark"]{color-scheme:dark;--bg:#101b24;--paper:#172733;--ink:#e8f1f8;--muted:#b5ccdc;--accent:#9ecbed;--line:#354e60;--good:#94dfbe;--bad:#ffbac5;--warn:#f6cc7d}
+*{box-sizing:border-box}html{font-size:20px;scroll-behavior:smooth}body{margin:0;background:var(--bg);color:var(--ink);font:1rem/1.75 "Segoe UI",Arial,sans-serif}main{max-width:1100px;margin:auto;padding:1.8rem 1.4rem 4rem;display:grid;gap:2.7rem}header,section,footer{display:grid;gap:1rem;min-width:0}h1,h2,h3,p{margin:0}h1,h2,h3{font-family:Bahnschrift,"Arial Narrow",Arial,sans-serif;line-height:1.25;text-wrap:balance}h1{font-size:2.15rem;max-width:26ch}h2{font-size:1.5rem}h3{font-size:1.12rem}p,li{max-width:65ch}.lede{font-size:1.12rem}.top,.controls,nav{display:flex;align-items:center;flex-wrap:wrap;gap:.65rem}.top{justify-content:space-between}.meta{font:.85rem/1.5 Consolas,monospace;color:var(--muted)}.small,.evidence{font-size:.88rem;color:var(--muted)}a{color:var(--accent);text-underline-offset:.2em}nav{gap:.45rem 1.2rem;font-size:.92rem}button{font:inherit;font-size:.92rem;line-height:1.4;border:1px solid var(--accent);border-radius:3px;background:var(--paper);color:var(--accent);padding:.5rem .75rem;cursor:pointer}button:hover{box-shadow:inset 0 0 0 1px var(--accent)}button[aria-pressed="true"]{background:var(--accent);color:var(--paper)}:root[data-theme="dark"] button[aria-pressed="true"]{color:var(--bg)}@media(prefers-color-scheme:dark){:root:not([data-theme="light"]) button[aria-pressed="true"]{color:var(--bg)}}:focus-visible{outline:3px solid var(--accent);outline-offset:4px}code,pre{font-family:Consolas,"Courier New",monospace}code{font-size:.94em;color:var(--accent);overflow-wrap:anywhere}pre{margin:0;padding:1rem;background:var(--paper);border:1px solid var(--line);font-size:.95rem;line-height:1.65;overflow-x:auto}pre code{color:var(--ink);overflow-wrap:normal}.kw,.type{color:var(--accent);font-weight:650}.fn,.str{color:var(--good)}.num{color:var(--warn)}.comment{color:var(--muted)}.scroll{overflow-x:auto;max-width:100%}table{width:100%;border-collapse:collapse;font-size:.94rem}th,td{padding:.75rem .65rem;text-align:left;vertical-align:top;border-bottom:1px solid var(--line)}th{font-size:.88rem;color:var(--muted)}.note{padding:1.1rem 1.25rem;background:var(--paper);border:1px solid var(--line);display:grid;gap:.6rem}.label{font-size:.85rem;font-weight:650;color:var(--accent)}.flow{list-style:none;margin:0;padding:0;border:1px solid var(--line);background:var(--paper);display:grid}.flow li{display:grid;grid-template-columns:13rem 1fr;gap:1rem;max-width:none;padding:.8rem 1rem;border-bottom:1px solid var(--line)}.flow li:last-child{border-bottom:0}.flow code{font-size:.86rem}.flow span{font-size:.94rem}.subsections{display:grid;gap:1.5rem}.subsections article{display:grid;gap:.65rem}ul,ol{margin:0;padding-left:1.4rem}li+li{margin-top:.45rem}.flow li+li{margin-top:0}.demo{display:grid;gap:1rem;padding:1.1rem;background:var(--paper);border:1px solid var(--line)}.readouts{display:grid;grid-template-columns:1fr 1fr;gap:1rem}.readouts>div{display:grid;gap:.35rem;border-bottom:2px solid var(--line);padding-bottom:.75rem}.value{font:1.1rem/1.6 Consolas,monospace}.log{font-size:.92rem;min-height:3.3em}.status{font-size:.9rem;color:var(--muted)}.good{color:var(--good)}.bad{color:var(--bad)}.quiz{display:grid;gap:1rem}.question{display:grid;gap:.6rem;padding:1rem 1.2rem;background:var(--paper);border:1px solid var(--line)}.question legend{padding:0 .3rem;font-weight:600}.answers{display:flex;flex-wrap:wrap;gap:.5rem}.feedback{font-size:.94rem}.feedback:empty{display:none}details{font-size:.94rem}summary{cursor:pointer;color:var(--accent)}details[open]{display:grid;gap:.75rem}.sources{font-size:.9rem;display:grid;gap:.55rem}.sources li{max-width:none}.nowrap{white-space:nowrap}footer{padding-top:1rem;border-top:1px solid var(--line)}@media(max-width:700px){html{font-size:18px}main{padding:1.2rem 1rem 3rem;gap:2.2rem}h1{font-size:1.85rem}.flow li{grid-template-columns:1fr;gap:.25rem}.readouts{grid-template-columns:1fr}.scroll table{min-width:700px}.top{align-items:flex-start}.value{font-size:1rem}}@media(prefers-reduced-motion:reduce){html{scroll-behavior:auto}}@media print{body{background:white;color:black}main{max-width:none;padding:0;gap:1.2rem}button,nav,.controls,.quiz{display:none}section{break-inside:auto}.note,.flow li,article{break-inside:avoid}.scroll{overflow:visible}.scroll table{min-width:0}a,code,.evidence,.small,.meta{color:black}pre{white-space:pre-wrap;font-size:10pt}.sources{font-size:10pt}}
+</style>
+</head>
+<body>
+<main>
+<header>
+<div class="top"><span class="meta">Source study / 15 Oct 2026 / e2a98e1b8af1</span><button id="theme" type="button">Switch theme</button></div>
+<h1>Designing OSC 7501 in WezTerm</h1>
+<p class="lede">The useful question is which component should own each job, and what evidence supports that choice. WezTerm's code and Wez's commit explanations give us a way to answer it.</p>
+<p>This lesson is for your role as the design reviewer. You can evaluate ownership, interfaces, tradeoffs and completeness before learning all the Rust syntax.</p>
+<nav aria-label="Lesson sections"><a href="#map">Architecture</a><a href="#principles">Design principles</a><a href="#messages">State and events</a><a href="#history">Wez's explanations</a><a href="#project">Our project</a><a href="#quiz">Self-check</a><a href="#sources">Sources</a></nav>
+<p class="small">The research uses your clean <code>wezterm/</code> clone and its full Git history. Our unfinished code in <code>.research/wezterm</code> is excluded from evidence about upstream style. This is a focused review of the terminal feature path, not the entire repository.</p>
+<p><a href="WEZTERM_DESIGN_GUIDE.md">Read the reusable engineering guide</a> · <a href="DECISIONS.md">Your design decisions</a> · <a href="wezterm-progress-walkthrough.html">Earlier OSC 9;4 walkthrough</a></p>
+</header>
+
+<section>
+<h2>What we can learn from the repository</h2>
+<p>Imagine a program reporting that a build is running while one child task needs permission. Someone must validate the report, retain both tasks, decide what a tab shows, and refresh that tab when the facts change. Those jobs need different information.</p>
+<div class="note"><h3>Read the evidence labels</h3><p><strong>Stated</strong> means a comment, document or verified Wez-authored commit gives the reason. <strong>Observed</strong> means the code does it. <strong>Inferred</strong> means we explain a benefit or recommend a design. We will label our judgment rather than present it as Wez's opinion.</p></div>
+<p>Many contributors work on WezTerm. A current implementation tells us about the project; a verified author and commit explanation let us attribute a particular decision to Wez. Neither guarantees that a future proposal will be accepted.</p>
+</section>
+
+<section id="map">
+<h2>A feature crosses several small boundaries</h2>
+<p>An escape sequence arrives as bytes. Each component turns it into something the next component can use. A Rust <em>crate</em> is a separately compiled library or program. WezTerm's repository contains many of them.</p>
+<ol class="flow" aria-label="Feature path from incoming bytes to presentation">
+<li><code>vtparse + escape parser</code><span>Recognize the sequence and produce a typed command. A parser can retain incomplete input without owning persistent terminal task records.</span></li>
+<li><code>term / TerminalState</code><span>Apply the command and retain terminal facts. This core has no GUI and does not directly manage a PTY.</span></li>
+<li><code>mux::Pane / LocalPane</code><span>Expose those facts through a shared pane interface. The local implementation wraps the terminal, process and PTY.</span></li>
+<li><code>Mux notifications</code><span>Announce changes to subscribers. Remote panes also need server, codec and client handling.</span></li>
+<li><code>lua-api-crates/mux</code><span>Give Lua scripts access to pane capabilities through the shared interface.</span></li>
+<li><code>wezterm-gui</code><span>Prepare title information, run formatting callbacks and render the result.</span></li>
+</ol>
+<p>These are cooperating layers rather than one strict call sequence. The GUI builds <code>PaneInformation</code> directly from the pane interface; a live Lua pane method is a separate access path. Notifications tell consumers when to refresh.</p>
+<p><strong>Stated boundaries.</strong> The parser documents encoding and decoding without terminal emulation. The terminal crate documents a GUI-independent model with a caller-supplied writer. <a href="#s-contracts">Read the contracts.</a></p>
+<p>For OSC 7501, parsing a task ID belongs near the bytes. Clearing all descendants of that ID needs the record store. Choosing a tab color needs presentation policy. Moving all three into one place would make that component know too much.</p>
+</section>
+
+<section id="principles">
+<h2>How to decide where code belongs</h2>
+<div class="subsections">
+<article>
+<h3>Let required knowledge determine ownership</h3>
+<p><strong>Stated.</strong> The title getter explains that <code>TerminalState</code> processes escape sequences without knowing about other tabs. It retains the terminal titles; the GUI handles the wider window presentation. <a href="#s-owner">Title design comment.</a></p>
+<p><strong>Our application.</strong> Your D002 choice, storing task records in <code>TerminalState</code>, follows that pattern. Record replacement, clearing and inheritance stay with the owner. Lua or the GUI can summarize those records for a tab.</p>
+<p>A process-exit event comes from the process wrapper. It must reach the record owner. Choosing a good owner does not remove the need to connect outside events.</p>
+</article>
+<article>
+<h3>Use a typed command at the handoff</h3>
+<p>An enum is a Rust type with named alternatives. Existing progress uses one enum for incoming instructions and another for stored state. This small distinction makes the boundary explicit.</p>
+<pre aria-label="Existing progress types, shortened for teaching"><code><span class="comment">// Existing types, shortened. This is not OSC 7501 code.</span>
+<span class="comment">// wezterm-escape-parser/src/osc.rs</span>
+<span class="kw">pub enum</span> <span class="type">Progress</span> {
+    SetPercentage(<span class="type">u8</span>),
+    Paused,
+    <span class="comment">// other commands omitted</span>
+}
+
+<span class="comment">// term/src/terminal.rs</span>
+<span class="kw">pub enum</span> <span class="type">Progress</span> {
+    Percentage(<span class="type">u8</span>),
+    None,
+    <span class="comment">// other stored states omitted</span>
+}</code></pre>
+<p><code>SetPercentage(42)</code> tells the terminal to do something. <code>Percentage(42)</code> describes the result. A <code>u8</code> is an unsigned 8-bit number. The types share a name but live in different modules. <a href="#s-progress">Source and performer.</a></p>
+<p><strong>Useful exception.</strong> The parser recognizes <code>Paused</code>, but the performer maps it to <code>None</code>. Recognizing syntax does not prove semantic support. Our capability reply must describe behavior we have actually connected and tested.</p>
+</article>
+<article>
+<h3>Use the common pane interface</h3>
+<p>A <em>trait</em> describes operations that different implementations provide. <code>Pane</code> lets consumers read a local pane or a remote client pane through the same interface. The Lua object resolves a pane by ID; it does not own the terminal.</p>
+<p><strong>Stated history.</strong> Wez merged separate GUI and mux pane Lua objects because there was no GUI-specific functionality in the GUI object. <a href="#h-pane">Read his explanation.</a></p>
+<p><strong>Our application.</strong> A record getter should use the existing pane API. A title-formatting snapshot is a separate connection. Existing progress supplies both a live <code>pane:get_progress()</code> method and <code>PaneInformation.progress</code>.</p>
+<p>An empty default getter can keep another pane implementation compiling. It does not make that implementation support OSC 7501.</p>
+</article>
+</div>
+</section>
+
+<section id="messages">
+<h2>A stored fact and a change message solve different problems</h2>
+<p><strong>Observed.</strong> Progress lives in the terminal. When its value changes, the performer stores the new value and sends an alert. The local pane can read the current value later. Here, <code>Alert</code> is an internal message; it does not automatically mean a desktop popup.</p>
+<p><strong>Stated history.</strong> Wez's first progress commit reused existing alerts and explicitly acknowledged that a reconnecting client would see no progress until another update, because separate state transfer was missing. <a href="#h-progress">Original commit.</a></p>
+<div class="demo" aria-labelledby="demo-title">
+<h3 id="demo-title">Try a consumer that misses an update</h3>
+<p class="small">Illustrative state-and-event model, using the existing progress vocabulary. This page runs no emulator or network connection. The snapshot button demonstrates the additional operation a robust reconnect path needs.</p>
+<div class="readouts" aria-live="polite"><div><span class="label">Authoritative terminal state</span><span class="value" id="owner-value">None</span><span class="status" id="change-count">Changes emitted: 0</span></div><div><span class="label">Consumer's cached value</span><span class="value" id="consumer-value">None</span><span class="status" id="connection">Consumer connected</span></div></div>
+<div class="controls"><button id="send42" type="button">Send 42%</button><button id="send80" type="button">Send 80%</button><button id="toggle-consumer" type="button">Disconnect consumer</button><button id="snapshot" type="button">Read current snapshot</button><button id="demo-reset" type="button">Reset example</button></div>
+<p class="log" id="demo-log" role="status">Disconnect the consumer, send 42%, then reconnect. Finally read a snapshot.</p>
+</div>
+<p>Reconnecting does not replay a missed event in this model. Reading a snapshot recovers the current fact even if the program stays quiet. Sending the same percentage twice produces one change, matching the terminal progress handler's equality check.</p>
+<p><strong>Our application.</strong> Keep one task store. Decide what a change notification carries. For future remote support, implement initial state transfer as well as ongoing changes. A local-only milestone does not settle either the remote snapshot design or wire compatibility.</p>
+<div class="note"><h3>Do not copy a pattern as an absolute rule</h3><p>Progress suppresses an identical update, while the current SetUserVar handler notifies after each assignment. For task records, a valid repeated report can refresh eviction recency without changing displayed content. These are separate concerns. <a href="#s-uservar">Comparison feature.</a></p></div>
+</section>
+
+<section>
+<h2>Keep the input path and the GUI responsive</h2>
+<p><strong>Stated.</strong> The PTY reader has a dedicated thread because nonblocking PTY reads are not portable across all supported platforms. The scheduler abstraction exists because GUI processing can require the main thread. Local pane alerts use that scheduler. <a href="#s-threads">Current comments and forwarding path.</a></p>
+<p><strong>Stated history.</strong> Wez described a large-paste blockage: a reader waits on a full channel, the program cannot finish output, and then it cannot accept more input. He removed that hard-blocking channel after rate control provided another way to manage load. Windows portability shaped the choice. <a href="#h-pty">Historical explanation.</a></p>
+<p><strong>Our application.</strong> Do bounded local work while processing a report. Use the established writer and notification route. Copy record data under the terminal lock, then release the lock before Lua conversion or callbacks. Check that a notification cannot synchronously reenter the same locked terminal.</p>
+<p><code>format-tab-title</code> is synchronous and must return quickly. Reading a prepared snapshot fits that contract. Waiting for a process, network response or unrelated lock would stall the GUI. <a href="#s-lua">Callback contract.</a></p>
+<p>A bounded record store that evicts an old entry has different behavior from a channel that blocks a PTY reader. The historical deadlock does not argue against our record limit.</p>
+</section>
+
+<section>
+<h2>Keep the API small and useful</h2>
+<p><strong>Stated history.</strong> Wez initially exposed progress to Lua, then added a default tab display in the next change. The later spinner explicitly respects custom title formatting. That supports separating state access from presentation policy. It does not imply that built-in defaults are unwelcome. <a href="#h-ui">Display history.</a></p>
+<p>Our API should expose records with stable IDs. A chosen glyph or tab summary loses detail a different Lua formatter might need. You selected the sorted list on October 27. Both shapes below have precedent elsewhere in the repository; the comparison records the tradeoff behind your choice.</p>
+<div class="scroll" role="region" aria-label="Pending Lua representation tradeoffs" tabindex="0"><table><thead><tr><th>D003 option</th><th>Convenience</th><th>Cost to the caller</th></tr></thead><tbody><tr><td>List sorted by task ID</td><td>Deterministic display order and straightforward iteration. Each record carries its ID.</td><td>Finding one named task needs a search or helper. Numeric positions are not stable task identities.</td></tr><tr><td>Table keyed by task ID</td><td>Direct lookup by ID, including a missing value when a task is absent.</td><td>Sort keys for deterministic display. The root uses the empty-string key.</td></tr></tbody></table></div>
+<article id="lua-lookup" class="subsections">
+<h3>Finding one task: the same information, two access methods</h3>
+<p>Suppose the script already knows the task ID it wants: <code>build/tests</code>. A keyed table uses that ID as the address of its record. A list uses numbered positions, so the script searches the entries for a matching ID. The list contains the necessary information; looking through it takes extra work.</p>
+<p class="small">These are ordinary Lua teaching examples, not an implemented WezTerm API or a settled field contract. Both describe the same three tasks.</p>
+<pre aria-label="Lua keyed table and direct lookup"><code><span class="kw">local</span> records_by_id = {
+  [<span class="str">"build"</span>]       = { state = <span class="str">"working"</span> },
+  [<span class="str">"build/tests"</span>] = { state = <span class="str">"blocked"</span> },
+  [<span class="str">"docs"</span>]        = { state = <span class="str">"done"</span> },
+}
+
+<span class="comment">-- Use the known ID directly as the key.</span>
+<span class="kw">local</span> task = records_by_id[<span class="str">"build/tests"</span>]
+<span class="kw">if</span> task <span class="kw">and</span> task.state == <span class="str">"blocked"</span> <span class="kw">then</span>
+  <span class="fn">print</span>(<span class="str">"Tests need attention"</span>)
+<span class="kw">end</span></code></pre>
+<p>The key <code>"build/tests"</code> selects its associated record. The slash needs no special handling inside this quoted string. If that key is absent, Lua returns <code>nil</code>, meaning no value. The <code>task and</code> check avoids reading a field from a missing record.</p>
+<pre aria-label="Lua sorted list and search by task ID"><code><span class="kw">local</span> records = {
+  { id = <span class="str">"build"</span>,       state = <span class="str">"working"</span> },
+  { id = <span class="str">"build/tests"</span>, state = <span class="str">"blocked"</span> },
+  { id = <span class="str">"docs"</span>,        state = <span class="str">"done"</span> },
+}
+
+<span class="kw">local</span> task = <span class="kw">nil</span>
+<span class="kw">for</span> _, candidate <span class="kw">in</span> <span class="fn">ipairs</span>(records) <span class="kw">do</span>
+  <span class="kw">if</span> candidate.id == <span class="str">"build/tests"</span> <span class="kw">then</span>
+    task = candidate
+    <span class="kw">break</span>
+  <span class="kw">end</span>
+<span class="kw">end</span>
+
+<span class="kw">if</span> task <span class="kw">and</span> task.state == <span class="str">"blocked"</span> <span class="kw">then</span>
+  <span class="fn">print</span>(<span class="str">"Tests need attention"</span>)
+<span class="kw">end</span></code></pre>
+<p><code>ipairs</code> visits numbered entries in sequence. The underscore discards the numeric position; <code>candidate</code> holds each record. The loop checks its ID and stops at a match. If none matches, <code>task</code> stays <code>nil</code>. Both examples print the same message.</p>
+<p>Although the target is currently at position 2, <code>records[2]</code> is not a reliable way to identify it. Adding or removing another task can shift positions. Sorting makes display order predictable; an ID gives a task its identity.</p>
+<details><summary>Self-check: what happens if a new ID sorts before build/tests?</summary><p>Its numeric position can change in the sorted list, so a search must keep comparing IDs. Direct keyed access remains <code>records_by_id["build/tests"]</code>. This is why a list position must not become a saved task identity.</p></details>
+<p>For displaying every task in order, the sorted list removes sorting work from the formatter. For finding one known task, the keyed table removes search code from the script. A helper could hide the list search, but it would still need an implementation. This Lua choice does not determine the internal Rust store's container.</p>
+</article>
+<p class="evidence">D003 is accepted: a list sorted by ID. See <a href="osc7501-decisions.html#lua-shape">the worked Lua examples</a> for the alternatives considered.</p>
+<p><strong>Stated history.</strong> For window configuration overrides, Wez accepted data without Lua closures or userdata because those objects belong to a particular Lua context. He started with whole top-level replacements rather than a complex deep-update API. <a href="#h-overrides">Ownership explains the restriction.</a></p>
+<p><strong>Our inference.</strong> Prefer an owned snapshot with clear field semantics over mutable handles into the record store. Decide absent values, inherited app information and field names before presenting the API as stable.</p>
+<div class="note"><h3>Compatibility depends on the boundary</h3><p>Wez preserved old boolean font configuration when introducing a richer slant enum. The mux protocol instead checks an explicit codec version. A shared <code>Alert</code> enum is serialized, so adding a variant needs a wire-compatibility audit even while remote feature support is deferred. <a href="#h-compat">Configuration precedent</a> · <a href="#s-codec">Codec contract.</a></p></div>
+</section>
+
+<section>
+<h2>Write code that fits the surrounding crate</h2>
+<div class="subsections">
+<article><h3>Preserve supported configurations</h3><p><strong>Stated.</strong> Wez made the parser work with <code>no_std</code> and allocation, accepting slower linear lookups in some cases. The current HEAD adds checks to prevent silent regressions. <code>no_std</code> means the standard library is unavailable; it does not mean allocation is forbidden. <a href="#h-nostd">Commit explanations.</a></p><p>Our parser should not require Lua, GUI code or an unconditional standard-library dependency. Test it separately so the full application's features do not hide a mistake.</p></article>
+<article><h3>Spend complexity on a demonstrated need</h3><p><strong>Observed and stated.</strong> Adjacent printable actions are merged to reduce heap use. Tests check action sizes. These are specific costs in frequent terminal traffic. <a href="#s-memory">Action representation.</a></p><p><strong>Our inference.</strong> Keep task data bounded and match nearby types and ownership conventions. Use the simplest adequate store before adding caching or a generic task framework. The parser uses Rust 2024 while the terminal crate uses Rust 2018, so even neighboring crates have different constraints.</p></article>
+<article><h3>Take validation rules from the protocol</h3><p><strong>Observed.</strong> Existing OSC parsers handle invalid input differently. Some decoding is strict; optional fields can be ignored; old progress numbers are forgiving. The top-level OSC parser can preserve failed input as an unspecified command. <a href="#s-invalid">Examples in the parser.</a></p><p><strong>Our application.</strong> Implement OSC 7501's own rejection and ignore rules. Finish validation before changing a record. Do not borrow permissive behavior merely because another OSC handler uses it.</p></article>
+<article><h3>Connect lifecycle behavior and test the actual path</h3><p><strong>Stated history.</strong> A recent reset fix explains that a program could leave keyboard modes behind after an unclean exit, and RIS did not clear them. Initialization had not been enough; recovery needed its own fix. <a href="#h-reset">Wez's reset explanation.</a></p><p>For our store, specify full reset, soft reset, screen switching, prompt start, process exit and acknowledgement separately. Test them at their entry points. A passing store test cannot prove that an incoming OSC sequence reaches it.</p></article>
+</div>
+<p>CONTRIBUTING asks for tests with comments explaining intent and documentation of behavior. It recommends fast <code>cargo check</code> iteration. Its old GUI directory reference has aged; use current source paths. The progress documentation also lags behind the current built-in display. <a href="#s-contributing">Contribution guidance</a> · <a href="#s-stale">A concrete stale claim.</a></p>
+</section>
+
+<section id="history">
+<h2>Four decisions worth reading in Wez's own history</h2>
+<p>Read the commit message before the diff. It often contains the problem, chosen tradeoff and remaining limitation. Dates below are author dates.</p>
+<div class="scroll" role="region" aria-label="Historical decisions and their motivations" tabindex="0"><table><thead><tr><th>Change</th><th>Reason given</th><th>Question it teaches us to ask</th></tr></thead><tbody>
+<tr><td>Progress, Feb 9, 2025</td><td>Reuse existing alerts; expose Lua; acknowledge missing reconnect transfer.</td><td>Does our reused path deliver current state to a consumer that missed events?</td></tr>
+<tr><td>Lua crate split, May 18, 2022</td><td>Reduce build time and allow more compilation in parallel.</td><td>Does this boundary help development as well as code organization?</td></tr>
+<tr><td>PTY channel fix, June 24, 2019</td><td>Remove a blocking cycle and preserve a Windows-compatible architecture.</td><td>What can block what, and which platforms must support the solution?</td></tr>
+<tr><td>Window overrides, Feb 27, 2021</td><td>Keep Lua-context-bound objects out of longer-lived data; begin with a limited workable API.</td><td>Who owns this object, and how long can callers safely keep it?</td></tr>
+</tbody></table></div>
+<p class="evidence">Verified Wez-authored commits: <a href="#h-progress">progress</a>, <a href="#h-build">crate split</a>, <a href="#h-pty">PTY channel</a>, <a href="#h-overrides">overrides</a>. These are examples under specific constraints, not universal rules about his preferences.</p>
+</section>
+
+<section id="project">
+<h2>What this means for our two-week project</h2>
+<p>Your chosen scope is native local support with Lua tab indicators for October 29. Remote mux support follows. Your chosen record owner is <code>TerminalState</code>, and the Lua snapshot is a list sorted by task ID.</p>
+<div class="scroll" role="region" aria-label="OSC 7501 work by architectural layer" tabindex="0"><table><thead><tr><th>Work</th><th>Where it belongs</th><th>Evidence that it works</th></tr></thead><tbody>
+<tr><td>Decode a report or query</td><td>Escape parser</td><td>Valid, invalid, bounded and fragmented byte-input tests.</td></tr>
+<tr><td>Maintain task records</td><td>Terminal-owned store</td><td>Replacement, subtree clearing, inheritance, eviction and lifetime tests.</td></tr>
+<tr><td>Connect incoming reports and lifecycle events</td><td>Terminal performer and local process wrapper</td><td>Actual bytes change the store; reset, prompt and exit use the intended rules.</td></tr>
+<tr><td>Expose data and announce changes</td><td>Pane interface, local implementation, notifications and Lua binding</td><td>Lua sees the chosen contract and receives fresh data when needed. Shared serialization is audited.</td></tr>
+<tr><td>Present useful indicators</td><td>Title information and example Lua formatter</td><td>A running development GUI demonstrates the behavior with repeatable commands.</td></tr>
+</tbody></table></div>
+<div class="note"><h3>Try the local alpha</h3><p>The separate research checkout now connects OSC parsing, record ownership, lifecycle behavior and Lua access to a tab indicator. Read <a href="alpha/README.md">the alpha test instructions</a> and <a href="alpha/TEST_RESULTS.md">the verification report</a>. Remote mux synchronization remains deferred.</p></div>
+<p>Before the next implementation step, use the engineering guide's review procedure. It asks for a concrete input, a named owner, lifecycle behavior, affected consumers, alternatives and meaningful checks. A short decision record will preserve your reasoning.</p>
+<p>The strongest question you can ask during review is <strong>"Which component owns this fact, and what happens if the consumer was absent when it changed?"</strong></p>
+</section>
+
+<section id="quiz">
+<h2>Practice reviewing a design</h2>
+<p>Choose an answer. Each question explains the result and allows another attempt.</p>
+<div class="quiz">
+<fieldset class="question" data-answer="model" data-feedback="The store needs existing task records to clear descendants. The parser validates the command; the terminal-owned model applies it."><legend>1. Where should subtree clearing happen?</legend><div class="answers"><button type="button" data-choice="parser">Escape parser</button><button type="button" data-choice="model">Terminal-owned store</button><button type="button" data-choice="tab">Tab renderer</button></div><p class="feedback" role="status"></p></fieldset>
+<fieldset class="question" data-answer="snapshot" data-feedback="An event stream can miss earlier changes. A current-state snapshot lets a new consumer recover even if the program sends nothing else."><legend>2. A new client connects after the last update. What is missing from a change-only design?</legend><div class="answers"><button type="button" data-choice="timer">A faster animation timer</button><button type="button" data-choice="snapshot">Current-state transfer</button><button type="button" data-choice="glyph">A different progress glyph</button></div><p class="feedback" role="status"></p></fieldset>
+<fieldset class="question" data-answer="audit" data-feedback="Alert is part of serialized mux messages. The original progress addition changed the codec version. Local scope does not prove a shared type has no wire impact."><legend>3. Remote support is deferred. Can we extend a shared Alert enum without inspecting the codec?</legend><div class="answers"><button type="button" data-choice="yes">Yes, scope makes it local</button><button type="button" data-choice="audit">Inspect serialization first</button></div><p class="feedback" role="status"></p></fieldset>
+<fieldset class="question" data-answer="evidence" data-feedback="We can use the current implementation as evidence of a pattern. A verified author explanation supports personal attribution; an observed pattern alone does not prove Wez's motive."><legend>4. You find an existing implementation but no explanation. How should the guide describe it?</legend><div class="answers"><button type="button" data-choice="motive">Wez's definite personal preference</button><button type="button" data-choice="evidence">Observed behavior, with benefits marked as inference</button></div><p class="feedback" role="status"></p></fieldset>
+</div>
+<div class="controls"><button id="quiz-reset" type="button">Reset answers</button><span id="quiz-score" class="small" role="status">0 of 4 correct</span></div>
+<noscript><p>The interactive controls need JavaScript. Answers: 1, terminal-owned store; 2, current-state transfer; 3, inspect serialization first; 4, observed behavior with inference labeled. The lesson and source references remain readable offline.</p></noscript>
+</section>
+
+<section id="sources">
+<h2>Read the source behind a claim</h2>
+<p class="small">Current code links use the exact revision of your clone. Links to GitHub need a connection; the lesson, demonstration and quiz do not. The <a href="WEZTERM_DESIGN_GUIDE.md">engineering guide</a> also gives local paths and a fuller evidence index.</p>
+<ol class="sources">
+<li id="s-contracts">Crate contracts: <a href="https://github.com/wezterm/wezterm/blob/e2a98e1b8af156988ad0ac778658ac27b60a55fb/wezterm-escape-parser/src/lib.rs#L1">escape parser</a> and <a href="https://github.com/wezterm/wezterm/blob/e2a98e1b8af156988ad0ac778658ac27b60a55fb/term/src/lib.rs#L1">terminal core</a>.</li>
+<li id="s-owner">State ownership rationale: <a href="https://github.com/wezterm/wezterm/blob/e2a98e1b8af156988ad0ac778658ac27b60a55fb/term/src/terminalstate/mod.rs#L638">title comment and progress getter</a>.</li>
+<li id="s-progress">Typed progress path: <a href="https://github.com/wezterm/wezterm/blob/e2a98e1b8af156988ad0ac778658ac27b60a55fb/wezterm-escape-parser/src/osc.rs#L884">command enum</a>, <a href="https://github.com/wezterm/wezterm/blob/e2a98e1b8af156988ad0ac778658ac27b60a55fb/term/src/terminal.rs#L37">stored enum</a>, <a href="https://github.com/wezterm/wezterm/blob/e2a98e1b8af156988ad0ac778658ac27b60a55fb/term/src/terminalstate/performer.rs#L1082">performer</a>, <a href="https://github.com/wezterm/wezterm/blob/e2a98e1b8af156988ad0ac778658ac27b60a55fb/mux/src/pane.rs#L240">Pane getter</a>, <a href="https://github.com/wezterm/wezterm/blob/e2a98e1b8af156988ad0ac778658ac27b60a55fb/lua-api-crates/mux/src/pane.rs#L149">Lua getter</a>.</li>
+<li id="s-uservar">Comparison feature: <a href="https://github.com/wezterm/wezterm/blob/e2a98e1b8af156988ad0ac778658ac27b60a55fb/term/src/terminalstate/performer.rs#L833">SetUserVar mutation and alert</a>.</li>
+<li id="s-threads">Threading: <a href="https://github.com/wezterm/wezterm/blob/e2a98e1b8af156988ad0ac778658ac27b60a55fb/mux/src/lib.rs#L279">PTY reader</a>, <a href="https://github.com/wezterm/wezterm/blob/e2a98e1b8af156988ad0ac778658ac27b60a55fb/promise/src/spawn.rs#L39">scheduler rationale</a>, <a href="https://github.com/wezterm/wezterm/blob/e2a98e1b8af156988ad0ac778658ac27b60a55fb/mux/src/localpane.rs#L943">local alert forwarding</a>.</li>
+<li id="s-lua">Display contracts: <a href="https://github.com/wezterm/wezterm/blob/e2a98e1b8af156988ad0ac778658ac27b60a55fb/docs/config/lua/window-events/format-tab-title.md#L8">synchronous callback</a>, <a href="https://github.com/wezterm/wezterm/blob/e2a98e1b8af156988ad0ac778658ac27b60a55fb/wezterm-gui/src/termwindow/mod.rs#L259">PaneInformation</a>, <a href="https://github.com/wezterm/wezterm/blob/e2a98e1b8af156988ad0ac778658ac27b60a55fb/wezterm-gui/src/tabbar.rs#L203">custom result before default rendering</a>.</li>
+<li id="s-codec">Wire compatibility: <a href="https://github.com/wezterm/wezterm/blob/e2a98e1b8af156988ad0ac778658ac27b60a55fb/codec/src/lib.rs#L442">version-bump instruction</a>, <a href="https://github.com/wezterm/wezterm/blob/e2a98e1b8af156988ad0ac778658ac27b60a55fb/codec/src/lib.rs#L795">serialized alert</a>, <a href="https://github.com/wezterm/wezterm/blob/e2a98e1b8af156988ad0ac778658ac27b60a55fb/wezterm-client/src/client.rs#L1160">client version check</a>.</li>
+<li id="s-memory">Memory choices: <a href="https://github.com/wezterm/wezterm/blob/e2a98e1b8af156988ad0ac778658ac27b60a55fb/wezterm-escape-parser/src/lib.rs#L70">action batching and size test</a>. Crate editions: <a href="https://github.com/wezterm/wezterm/blob/e2a98e1b8af156988ad0ac778658ac27b60a55fb/wezterm-escape-parser/Cargo.toml#L5">parser</a>, <a href="https://github.com/wezterm/wezterm/blob/e2a98e1b8af156988ad0ac778658ac27b60a55fb/term/Cargo.toml#L5">terminal</a>.</li>
+<li id="s-invalid">Contextual parsing: <a href="https://github.com/wezterm/wezterm/blob/e2a98e1b8af156988ad0ac778658ac27b60a55fb/wezterm-escape-parser/src/osc.rs#L157">top-level fallback</a>, <a href="https://github.com/wezterm/wezterm/blob/e2a98e1b8af156988ad0ac778658ac27b60a55fb/wezterm-escape-parser/src/osc.rs#L175">OSC 52 decoding</a>, <a href="https://github.com/wezterm/wezterm/blob/e2a98e1b8af156988ad0ac778658ac27b60a55fb/wezterm-escape-parser/src/osc.rs#L320">progress parsing</a>.</li>
+<li id="s-contributing">Contributor guidance: <a href="https://github.com/wezterm/wezterm/blob/e2a98e1b8af156988ad0ac778658ac27b60a55fb/CONTRIBUTING.md#L64">iteration</a>, <a href="https://github.com/wezterm/wezterm/blob/e2a98e1b8af156988ad0ac778658ac27b60a55fb/CONTRIBUTING.md#L98">tests and intent</a>, <a href="https://github.com/wezterm/wezterm/blob/e2a98e1b8af156988ad0ac778658ac27b60a55fb/CONTRIBUTING.md#L157">behavior documentation</a>.</li>
+<li id="s-stale">Documentation drift: <a href="https://github.com/wezterm/wezterm/blob/e2a98e1b8af156988ad0ac778658ac27b60a55fb/docs/config/lua/pane/get_progress.md#L30">progress page's old Lua-only claim</a>.</li>
+<li id="h-progress">Wez, Feb 9, 2025: <a href="https://github.com/wezterm/wezterm/commit/44866cc137e336d8c00b23f5e0d7d1f03983b591">introduce progress with alerts, Lua and reconnect limitation</a>.</li>
+<li id="h-ui">Wez: <a href="https://github.com/wezterm/wezterm/commit/52c1ca749552af4d8a2f18ec10fe8f14b6622519">default progress display, Feb 10, 2025</a>; <a href="https://github.com/wezterm/wezterm/commit/31c758f1cd7bb1b4c06a9d7b9e89f17ae007016c">spinner respecting custom formatting, July 15, 2026</a>.</li>
+<li id="h-pane">Wez, Sept 11, 2022: <a href="https://github.com/wezterm/wezterm/commit/42e4a51a2825e1a4166d6bd2dc92571c9494550c">merge GUI and mux pane Lua objects</a>.</li>
+<li id="h-build">Wez, May 18, 2022: <a href="https://github.com/wezterm/wezterm/commit/2f14d640e8b0ff73141a4f50a9058f5f1dc7983c">split Lua crates to improve build time</a>. <a href="https://github.com/wezterm/wezterm/blob/e2a98e1b8af156988ad0ac778658ac27b60a55fb/lua-api-crates/README.md#L1">Current README.</a></li>
+<li id="h-pty">Wez, June 24, 2019: <a href="https://github.com/wezterm/wezterm/commit/bb04d911015a888c9c0e38238ec4bb41c8d2191f">remove blocking channel and explain Windows portability</a>.</li>
+<li id="h-overrides">Wez, Feb 27, 2021: <a href="https://github.com/wezterm/wezterm/commit/db08b8c1dcd81b5d9a54cf3341dc85159fa0163a">window overrides and Lua object lifetimes</a>.</li>
+<li id="h-nostd">Wez: <a href="https://github.com/wezterm/wezterm/commit/0cd3fe8f975515c28a44825dce7894da802296d9">no_std with allocation, Apr 20, 2025</a>; <a href="https://github.com/wezterm/wezterm/commit/e2a98e1b8af156988ad0ac778658ac27b60a55fb">repair and add CI coverage, Oct 10, 2026</a>.</li>
+<li id="h-compat">Wez, Mar 12, 2022: <a href="https://github.com/wezterm/wezterm/commit/84d4187c9af93be5b7b41cd1cfcf96d316ee9c74">keep boolean configuration compatibility when introducing slant enum</a>.</li>
+<li id="h-reset">Wez, Aug 12, 2026: <a href="https://github.com/wezterm/wezterm/commit/fe3006aefcdc4c22924e7bce966b2c430dade4f1">reset omitted terminal modes on RIS</a>.</li>
+</ol>
+</section>
+<footer><p>Use <a href="WEZTERM_DESIGN_GUIDE.md">WEZTERM_DESIGN_GUIDE.md</a> as the implementation reference. <a href="AGENTS.md">AGENTS.md</a> directs future project work to it and to your accepted decisions.</p><p class="small">This page works offline with inline styles and scripts. Source reading verified against the pinned clone; no feature implementation or GUI build was performed for this lesson.</p></footer>
+</main>
+<script>
+(function () {
+  'use strict';
+  const themeButton = document.getElementById('theme');
+  function currentTheme() {
+    return document.documentElement.dataset.theme || (window.matchMedia('(prefers-color-scheme: dark)').matches ? 'dark' : 'light');
+  }
+  function updateThemeLabel() {
+    themeButton.textContent = currentTheme() === 'dark' ? 'Use light theme' : 'Use dark theme';
+  }
+  themeButton.addEventListener('click', function () {
+    document.documentElement.dataset.theme = currentTheme() === 'dark' ? 'light' : 'dark';
+    updateThemeLabel();
+  });
+  const preference = window.matchMedia('(prefers-color-scheme: dark)');
+  if (preference.addEventListener) preference.addEventListener('change', updateThemeLabel);
+  updateThemeLabel();
+
+  let owner = null;
+  let consumer = null;
+  let connected = true;
+  let changes = 0;
+  function valueText(value) { return value === null ? 'None' : 'Percentage(' + value + ')'; }
+  function renderDemo(message) {
+    document.getElementById('owner-value').textContent = valueText(owner);
+    document.getElementById('consumer-value').textContent = valueText(consumer);
+    document.getElementById('change-count').textContent = 'Changes emitted: ' + changes;
+    document.getElementById('connection').textContent = connected ? 'Consumer connected' : 'Consumer disconnected';
+    document.getElementById('toggle-consumer').textContent = connected ? 'Disconnect consumer' : 'Reconnect consumer';
+    document.getElementById('demo-log').textContent = message;
+  }
+  function send(value) {
+    if (owner === value) {
+      renderDemo('The terminal already holds ' + value + '%. No new change is emitted; a stale consumer stays stale.');
+      return;
+    }
+    owner = value;
+    changes += 1;
+    if (connected) consumer = value;
+    renderDemo(connected ? 'The owner changed and the connected consumer received the event.' : 'The owner changed. The disconnected consumer missed the event.');
+  }
+  document.getElementById('send42').addEventListener('click', function () { send(42); });
+  document.getElementById('send80').addEventListener('click', function () { send(80); });
+  document.getElementById('toggle-consumer').addEventListener('click', function () {
+    connected = !connected;
+    renderDemo(connected ? 'Reconnected. This change-only model has no replay or automatic snapshot; the cache has not refreshed.' : 'Disconnected. The owner can still change while this consumer is absent.');
+  });
+  document.getElementById('snapshot').addEventListener('click', function () {
+    if (!connected) { renderDemo('Reconnect the consumer before it can read the owner.'); return; }
+    consumer = owner;
+    renderDemo('The snapshot supplies current state. It does not require another report from the program.');
+  });
+  document.getElementById('demo-reset').addEventListener('click', function () {
+    owner = null; consumer = null; connected = true; changes = 0;
+    renderDemo('Disconnect the consumer, send 42%, then reconnect. Finally read a snapshot.');
+  });
+
+  const questions = Array.from(document.querySelectorAll('.question'));
+  const answered = new Map();
+  function updateScore() {
+    let score = 0;
+    answered.forEach(function (correct) { if (correct) score += 1; });
+    document.getElementById('quiz-score').textContent = score + ' of ' + questions.length + ' correct';
+  }
+  questions.forEach(function (question, index) {
+    const buttons = Array.from(question.querySelectorAll('[data-choice]'));
+    buttons.forEach(function (button) {
+      button.addEventListener('click', function () {
+        const correct = button.dataset.choice === question.dataset.answer;
+        answered.set(index, correct);
+        buttons.forEach(function (item) { item.setAttribute('aria-pressed', String(item === button)); });
+        const feedback = question.querySelector('.feedback');
+        feedback.className = 'feedback ' + (correct ? 'good' : 'bad');
+        feedback.textContent = (correct ? 'Correct. ' : 'Try again. ') + question.dataset.feedback;
+        updateScore();
+      });
+    });
+  });
+  document.getElementById('quiz-reset').addEventListener('click', function () {
+    answered.clear();
+    questions.forEach(function (question) {
+      question.querySelector('.feedback').textContent = '';
+      question.querySelectorAll('[data-choice]').forEach(function (button) { button.removeAttribute('aria-pressed'); });
+    });
+    updateScore();
+  });
+})();
+</script>
+</body>
+</html>

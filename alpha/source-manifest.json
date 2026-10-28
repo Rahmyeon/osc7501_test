@@ -1,0 +1,95 @@
+{
+  "source_revision": "e2a98e1b8af156988ad0ac778658ac27b60a55fb",
+  "patch_sha256": "c8abfd6e66268da6b34803e24be21816b422748f7dc02d22bdd784e63b2111b8",
+  "applies_to_clean_reference": true,
+  "files": [
+    {
+      "path": "docs/config/lua/PaneInformation.md",
+      "sha256": "7b7b35af2a293ddd0c665108c76c0c5913ec81af458cd5c0f19306bdd13ffb91"
+    },
+    {
+      "path": "docs/config/lua/pane/get_program_status.md",
+      "sha256": "7aa14edfe99d3e2767d614b58e622952192d6c0cf5586d71370aca922373a917"
+    },
+    {
+      "path": "lua-api-crates/mux/src/pane.rs",
+      "sha256": "6ac46d6fa5ec2e1caac2e420022e401ff876b3caccf37be0d819f6e42a449038"
+    },
+    {
+      "path": "mux/src/lib.rs",
+      "sha256": "0825b627f5310cbd449ab4cec204e4e4ccf299f001d252d154e7be4d32e08ae4"
+    },
+    {
+      "path": "mux/src/localpane.rs",
+      "sha256": "f9cd90b5688e84927f2d623c79fa0ae3f304007577b5d88bf850a35d7c233899"
+    },
+    {
+      "path": "mux/src/pane.rs",
+      "sha256": "41856226114834d51411b2cba878a504c251b000046d4c8d622df4726c729f72"
+    },
+    {
+      "path": "term/src/lib.rs",
+      "sha256": "94bc409cd5d7c63e58e79654f754166355d53ae3ab48f022b21ebb83a9030352"
+    },
+    {
+      "path": "term/src/program_status.rs",
+      "sha256": "6164509a1b7d8f8588217ca272ab039dd84105a3b9624460228acd75b5ced0fd"
+    },
+    {
+      "path": "term/src/terminal.rs",
+      "sha256": "59b3f706c212b761754d4cd64b722c9b49b1676ca0a0d36624eae68a2a4e1bad"
+    },
+    {
+      "path": "term/src/terminalstate/mod.rs",
+      "sha256": "92c6d0baa187aa5c27338de91e786f6882f7adab4d8491101815f7f0fa4d1aac"
+    },
+    {
+      "path": "term/src/terminalstate/performer.rs",
+      "sha256": "ef287ffb357cdb4418378513cacf8beee39c5cce23ed092cb6a3bcbdef00a100"
+    },
+    {
+      "path": "term/src/test/mod.rs",
+      "sha256": "133b08adcc55cbb78e1d36ef75b8cb2fb2eb38784899cf78b2e7a2f12ea84f65"
+    },
+    {
+      "path": "term/src/test/program_status.rs",
+      "sha256": "cd06f96d8159a92b1bd8665daee68841b2d14e8d1795909102207f43313c7a21"
+    },
+    {
+      "path": "vtparse/src/lib.rs",
+      "sha256": "a53fbddade5f266523c0d664368e6fc2ec44b5824c7419afa6cdc89742639045"
+    },
+    {
+      "path": "wezterm-escape-parser/src/lib.rs",
+      "sha256": "4d7ada9975ce281a44ba38825fac3f62ab1c0609dfd406a06da98eabd5a2d3d1"
+    },
+    {
+      "path": "wezterm-escape-parser/src/osc.rs",
+      "sha256": "a9c17b1a5394ba63a9a160a9b632e8f134d36a167cd87deb70ff7776fec66332"
+    },
+    {
+      "path": "wezterm-escape-parser/src/program_status.rs",
+      "sha256": "ac696cdccaf7bb6267771398c8bcc0f44d845a7657031b53c9a017e7a1612a19"
+    },
+    {
+      "path": "wezterm-gui/src/frontend.rs",
+      "sha256": "92bb2a39ed72941704a0a26af2bb7f8c04fc0a3cf70e23e9073b91cd2284b175"
+    },
+    {
+      "path": "wezterm-gui/src/overlay/copy.rs",
+      "sha256": "b593bfa51ec0cde228523f9c61882a49fa9f7eb253b419ff6550badbd0ef6242"
+    },
+    {
+      "path": "wezterm-gui/src/overlay/quickselect.rs",
+      "sha256": "dffde27a9af936fc86dbcd485309aa2d00e38bc9ad497213358f9e5058e66a72"
+    },
+    {
+      "path": "wezterm-gui/src/termwindow/mod.rs",
+      "sha256": "6da0f9d5b8dd2a9afede621b508678227ad40784c52bbb6d9df3f564b96e1ebb"
+    },
+    {
+      "path": "wezterm-mux-server-impl/src/dispatch.rs",
+      "sha256": "4553f12a87acf0ec717e72f685019f9ee9fa24875a180fdfc3e50c6258cb75ee"
+    }
+  ]
+}

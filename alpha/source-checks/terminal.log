@@ -1,0 +1,96 @@
+warning: hard linking files in the incremental compilation cache failed. copying files instead. consider moving the cache directory to a file system which supports hard linking in session dir `\\?\C:\Users\omotu\projects\osc7501\.research\wezterm\target\debug\incremental\vtparse-1jgst87kn18sk\s-hnm66zrio5-1mg248o-working`
+
+warning: `vtparse` (lib) generated 1 warning
+warning: hard linking files in the incremental compilation cache failed. copying files instead. consider moving the cache directory to a file system which supports hard linking in session dir `\\?\C:\Users\omotu\projects\osc7501\.research\wezterm\target\debug\incremental\wezterm_escape_parser-23arbapioli4p\s-hnm674wzda-0x120e4-working`
+
+warning: `wezterm-escape-parser` (lib) generated 1 warning
+warning: hard linking files in the incremental compilation cache failed. copying files instead. consider moving the cache directory to a file system which supports hard linking in session dir `\\?\C:\Users\omotu\projects\osc7501\.research\wezterm\target\debug\incremental\wezterm_cell-11o6suw1vi8co\s-hnm675yr51-1ly42xy-working`
+
+warning: `wezterm-cell` (lib) generated 1 warning
+warning: hard linking files in the incremental compilation cache failed. copying files instead. consider moving the cache directory to a file system which supports hard linking in session dir `\\?\C:\Users\omotu\projects\osc7501\.research\wezterm\target\debug\incremental\wezterm_surface-2k0eaghyoa4nh\s-hnm676jad7-1eqnjw5-working`
+
+warning: `wezterm-surface` (lib) generated 1 warning
+warning: hard linking files in the incremental compilation cache failed. copying files instead. consider moving the cache directory to a file system which supports hard linking in session dir `\\?\C:\Users\omotu\projects\osc7501\.research\wezterm\target\debug\incremental\termwiz-2wg1ny1uux646\s-hnm6777hav-1xmny3q-working`
+
+warning: `termwiz` (lib) generated 1 warning
+warning: hard linking files in the incremental compilation cache failed. copying files instead. consider moving the cache directory to a file system which supports hard linking in session dir `\\?\C:\Users\omotu\projects\osc7501\.research\wezterm\target\debug\incremental\wezterm_term-1gvzlh1jtvtr4\s-hnm6784rv7-1n4l5sw-working`
+
+warning: `wezterm-term` (lib test) generated 1 warning
+    Finished `test` profile [unoptimized + debuginfo] target(s) in 1.18s
+     Running unittests src\lib.rs (target\debug\deps\wezterm_term-70dd3d78e9f12885.exe)
+
+running 71 tests
+test config::test_canon ... ok
+test program_status::tests::program_status_inherits_from_nearest_existing_ancestor ... ok
+test program_status::tests::program_status_presentation_snapshot_is_owned_and_resolves_inheritance ... ok
+test program_status::tests::program_status_prompt_and_exit_keep_finished_records ... ok
+test program_status::tests::program_status_replaces_the_complete_record ... ok
+test program_status::tests::program_status_subtree_clearing_respects_boundaries ... ok
+test test::c0::test_tab ... ok
+test test::c0::test_bs ... ok
+test test::csi::test_cha ... ok
+test test::c1::test_nel ... ok
+test test::c0::test_cr ... ok
+test test::c1::test_ind ... ok
+test test::csi::test_cup ... ok
+test test::c1::test_hts ... ok
+test test::c0::test_lf ... ok
+test test::csi::test_789 ... ok
+test program_status::tests::program_status_ancestor_eviction_updates_existing_child_inheritance ... ok
+test test::c1::test_ri ... ok
+test program_status::tests::program_status_evicts_oldest_update_including_identical_refreshes ... ok
+test test::csi::test_hvp ... ok
+test test::csi::test_rep ... ok
+test test::csi::test_vpa ... ok
+test test::csi::test_irm ... ok
+test test::csi::test_dch ... ok
+test test::csi::test_dl ... ok
+test test::csi::test_ech ... ok
+test test::csi::test_ich ... ok
+test test::issue_1161 ... ok
+test test::cursor_movement_damage ... ok
+test test::program_status::program_status_change_callback_tracks_visible_mutations ... ok
+test test::program_status::program_status_clear_uses_path_boundaries_and_missing_parents ... ok
+test test::csi::test_ed_erase_scrollback ... ok
+test test::csi::test_ed ... ok
+test test::program_status::program_status_fragmented_reports_accept_bel_and_st ... ok
+test test::image::kitty_image_with_zero_pixel_dimensions_does_not_panic ... ok
+test test::image::kitty_zero_dimension_image_does_not_panic ... ok
+test test::program_status::program_status_full_reset_clears_but_soft_reset_and_screen_changes_preserve ... ok
+test test::image::kitty_frame_edit_keeps_the_stored_hash_current ... ok
+test test::program_status::program_status_osc_133_a_cleans_transients_but_p_does_not ... ok
+test test::program_status::program_status_exit_before_buffer_drain_does_not_revive_work ... ok
+test test::program_status::program_status_only_queries_write_the_fixed_capability_reply ... ok
+test test::basic_output ... ok
+test test::program_status::program_status_process_exit_cleans_transients_and_preserves_results ... ok
+test test::image::kitty_valid_image_is_accepted ... ok
+test test::program_status::program_status_snapshots_are_owned_copies ... ok
+test test::program_status::program_status_replacement_removes_omitted_fields_and_updates_inheritance ... ok
+test test::test_1573 ... ok
+test test::program_status::program_status_invalid_reports_do_not_partially_replace_records ... ok
+test test::test_emoji_with_modifier ... ok
+test test::test_region_scrollback_limit ... ok
+test test::test_resize_wrap_dectcm_issue_978 ... ok
+test test::test_resize_wrap_escape_code_issue_978 ... ok
+test test::scroll_down_within_left_and_right_margins ... ok
+test test::scroll_up_within_left_and_right_margins ... ok
+test test::test_resize_wrap_issue_971 ... ok
+test test::test_region_scroll ... ok
+test test::test_alt_screen_region_scroll ... ok
+test test::test_dec_double_width ... ok
+test test::test_ri ... ok
+test test::test_resize_2162_by_2 ... ok
+test test::test_resize_2162 ... ok
+test test::test_delete_lines ... ok
+test test::test_resize_wrap_sgc_issue_978 ... ok
+test test::test_hyperlinks ... ok
+test test::test_scroll_margins ... ok
+test test::test_resize_2162_by_2_then_up_1 ... ok
+test test::test_resize_wrap ... ok
+test test::test_scrollup ... ok
+test test::test_semantic_1539 ... ok
+test test::test_semantic ... ok
+test test::test_dec_special_graphics ... ok
+
+test result: ok. 71 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.03s
+

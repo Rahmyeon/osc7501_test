@@ -1,0 +1,35 @@
+   Compiling vtparse v0.7.0 (C:\Users\omotu\projects\osc7501\.research\wezterm\vtparse)
+    Finished `test` profile [unoptimized + debuginfo] target(s) in 3.04s
+     Running unittests src\lib.rs (target\debug\deps\vtparse-e0b8812b5df36bbd.exe)
+
+running 27 tests
+test test::osc_fedora_vte ... ok
+test test::osc_utf8 ... ok
+test test::kitty_img ... ok
+test test::program_status_cancellation_does_not_dispatch_a_prefix ... ok
+test test::print_utf8 ... ok
+test test::test_colon_rgb ... ok
+test test::program_status_waits_for_complete_st ... ok
+test test::test_mixed ... ok
+test test::sixel ... ok
+test test::test_csi_intermediates ... ok
+test test::test_csi_omitted_param ... ok
+test test::test_decset ... ok
+test test::test_csi_too_many_params ... ok
+test test::test_ommitted_dcs_param ... ok
+test test::test_fancy_underline ... ok
+test test::test_osc_too_many_params ... ok
+test test::test_osc_with_bel_st ... ok
+test test::test_osc_with_c1_st ... ok
+test test::test_osc_with_esc_sequence_st ... ok
+test test::test_osc_with_no_params ... ok
+test test::test_print ... ok
+test test::tmux_control ... ok
+test test::tmux_passthru ... ok
+test test::utf8_control ... ok
+test test::program_status_cap_and_semicolons_are_protocol_specific ... ok
+test transitions::tests::test_transitions ... ok
+test test::program_status_has_bounded_unterminated_storage ... ok
+
+test result: ok. 27 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.01s
+

@@ -1,0 +1,139 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>OSC 7501 in WezTerm: implementation decisions</title>
+<style>
+:root{color-scheme:light;--bg:#f4f7fa;--paper:#ffffff;--ink:#172d3f;--muted:#35566d;--accent:#245b8a;--line:#c9d7e2;--attention:#774900;--success:#155b42;--danger:#a51d32}
+@media(prefers-color-scheme:dark){:root{color-scheme:dark;--bg:#101b24;--paper:#172733;--ink:#e8f1f8;--muted:#afc6d6;--accent:#88bde7;--line:#354e60;--attention:#f2c46d;--success:#8cddbb;--danger:#ffacb8}}
+:root[data-theme="light"]{color-scheme:light;--bg:#f4f7fa;--paper:#ffffff;--ink:#172d3f;--muted:#35566d;--accent:#245b8a;--line:#c9d7e2;--attention:#774900;--success:#155b42;--danger:#a51d32}
+:root[data-theme="dark"]{color-scheme:dark;--bg:#101b24;--paper:#172733;--ink:#e8f1f8;--muted:#afc6d6;--accent:#88bde7;--line:#354e60;--attention:#f2c46d;--success:#8cddbb;--danger:#ffacb8}
+*{box-sizing:border-box}html{font-size:20px;scroll-behavior:smooth}body{margin:0;background:var(--bg);color:var(--ink);font-family:"Segoe UI",Arial,sans-serif;line-height:1.7}main{max-width:1100px;margin:auto;padding:2rem 1.4rem 4rem;display:grid;gap:2.2rem}header,section,footer{display:grid;gap:.8rem}h1,h2,h3,p{margin:0}h1,h2,h3{font-family:Bahnschrift,"Arial Narrow",sans-serif;line-height:1.2;text-wrap:balance}h1{font-size:2.25rem;max-width:23ch}h2{font-size:1.5rem}h3{font-size:1.1rem}p,li{max-width:67ch}a{color:var(--accent);text-underline-offset:.2em}.topline{display:flex;gap:1rem;justify-content:space-between;align-items:center;color:var(--muted);font-size:.85rem}.meta{font-family:Consolas,monospace}.lede{font-size:1.1rem}nav,.controls{display:flex;gap:.55rem;flex-wrap:wrap;align-items:center}nav{gap:1rem;font-size:.9rem}button{font:inherit;font-size:.9rem;line-height:1.4;background:var(--paper);color:var(--ink);border:1px solid var(--line);border-radius:3px;padding:.45rem .75rem;cursor:pointer}button:hover{border-color:var(--accent)}button:disabled{opacity:.55;cursor:default}button.primary{background:var(--accent);color:var(--paper);border-color:var(--accent)}:root[data-theme="dark"] button.primary{color:var(--bg)}@media(prefers-color-scheme:dark){:root:not([data-theme="light"]) button.primary{color:var(--bg)}}:focus-visible{outline:3px solid var(--accent);outline-offset:4px}.note{padding:1rem 1.2rem;background:var(--paper);border:1px solid var(--line)}.small{font-size:.85rem;color:var(--muted)}code{font-family:Consolas,"Courier New",monospace;font-size:.92em;color:var(--accent);overflow-wrap:anywhere}.scroll{overflow-x:auto;max-width:100%}table{width:100%;border-collapse:collapse;font-size:.93rem}th,td{text-align:left;vertical-align:top;padding:.85rem .65rem;border-bottom:1px solid var(--line)}th{color:var(--muted);font-size:.85rem;font-weight:600}td:first-child{width:21%;font-weight:600}td:nth-child(2){width:31%}.terminal{background:var(--paper);border:1px solid var(--line);border-radius:5px;overflow:hidden;display:grid}.tabstrip{display:flex;gap:.7rem;flex-wrap:wrap;align-items:center;padding:.75rem 1rem;border-bottom:1px solid var(--line);font-family:Consolas,monospace;font-size:.9rem}.tabname{font-weight:700}.signal{font-size:.8rem;padding:.15rem .5rem;border:1px solid currentColor;border-radius:3px}.working{color:var(--accent)}.blocked{color:var(--attention)}.done{color:var(--success)}.error{color:var(--danger)}.terminalbody{padding:1rem;display:grid;gap:.8rem}.event{font-family:Consolas,monospace;overflow-wrap:anywhere;font-size:.95rem}.records{display:grid;gap:.3rem;font-family:Consolas,monospace;font-size:.85rem}.record{display:flex;justify-content:space-between;gap:1rem;border-bottom:1px solid var(--line);padding:.3rem 0}.steps{margin:0;padding-left:1.5rem}.steps li{padding:.3rem 0}.quiz{display:grid;gap:1rem}.question{padding:1rem 1.2rem;border:1px solid var(--line);background:var(--paper);display:grid;gap:.6rem}.answers{display:flex;gap:.5rem;flex-wrap:wrap}.feedback{font-size:.9rem;min-height:1.5em}.feedback:empty{display:none}footer{padding-top:1rem;border-top:1px solid var(--line)}@media(max-width:650px){html{font-size:18px}main{padding:1.2rem 1rem 3rem;gap:1.8rem}h1{font-size:1.8rem}table{min-width:730px}.topline{align-items:flex-start}.record{flex-direction:column;gap:0}}@media(prefers-reduced-motion:reduce){html{scroll-behavior:auto}}@media print{body{background:white;color:black}main{max-width:none;padding:0}button,nav,.controls,.quiz{display:none}.scroll{overflow:visible}table{min-width:0;font-size:10pt}.terminal,.note{break-inside:avoid}}
+</style>
+<style>pre{margin:0;padding:1rem;background:var(--paper);border:1px solid var(--line);overflow:auto;font-family:Consolas,monospace;font-size:.95rem;line-height:1.65}pre code{color:var(--ink)}.lua-kw{color:var(--accent);font-weight:700}.lua-str{color:var(--success)}</style>
+</head>
+<body>
+<main>
+<header>
+<div class="topline"><span class="meta">WezTerm / design proposal / 14 Oct 2026</span><button id="theme" type="button">Switch theme</button></div>
+<h1>What do we need to decide for OSC 7501?</h1>
+<p class="lede">A build is running in one pane. Another task needs approval. The implementation has to preserve both facts and help you find the task that needs you.</p>
+<p>This guide separates protocol obligations from proposed WezTerm behavior. A local alpha now implements the selected path; alternatives below remain design context. See <a href="alpha/README.md">how to run and test the alpha</a> for its actual API and limits.</p>
+<p class="note"><a href="wezterm-progress-walkthrough.html">Start with the student walkthrough: how WezTerm's existing OSC 9;4 feature works</a>. It traces one report through the code and breaks OSC 7501 into project milestones. Current WezTerm source places parsing in <code>wezterm-escape-parser</code>.</p>
+<div class="note"><h2>Local alpha / 27 October 2026</h2><p>The accepted scope is native local support with Lua tab indicators. Remote mux support follows. TerminalState owns records; the Lua snapshot is a sorted list, selected after the design exercises.</p><p>The implementation connects parsing, the record store, lifecycle events, pane and Lua access, and a sample tab formatter. Use <a href="alpha/README.md">the alpha test instructions</a> and consult <a href="alpha/TEST_RESULTS.md">the checks actually performed</a>.</p><p><a href="IMPLEMENTATION_PLAN.md">Implementation plan</a> and <a href="DECISIONS.md">decision history</a>. The comparison below preserves the reasoning behind D003.</p></div>
+<nav aria-label="Sections"><a href="#lua-shape">Lua decision</a><a href="#ghostty">Ghostty implementation</a><a href="#fixed">Spec requirements</a><a href="#choices">Design choices</a><a href="#example">Worked example</a><a href="#check">Self-check</a></nav>
+</header>
+<section id="lua-shape">
+<h2>D003: a list or a table keyed by task ID?</h2>
+<p>You selected Option A on October 27. Both options expose the same task records. The Rust store stays in TerminalState. This choice concerns the snapshot that Lua receives, not the protocol or record ownership. The alpha implements <code>pane:get_program_status()</code> as the sorted list.</p>
+<h3>Option A: a list of records</h3>
+<pre><code><span class="lua-kw">local</span> records = {
+  { id = <span class="lua-str">""</span>, state = <span class="lua-str">"working"</span> },
+  { id = <span class="lua-str">"build/test"</span>, state = <span class="lua-str">"blocked"</span> },
+}
+
+<span class="lua-kw">for</span> _, record <span class="lua-kw">in</span> ipairs(records) <span class="lua-kw">do</span>
+  print(record.id, record.state)
+<span class="lua-kw">end</span></code></pre>
+<p>A list is convenient when you want to draw or inspect every task. We can return entries sorted by ID, giving repeatable output. Each entry carries its own identity and is easy to pass to formatting helpers.</p>
+<p>The drawback is lookup: finding <code>build/test</code> means scanning the entries or building a lookup table. Numeric positions can change between snapshots. A root record is optional, so <code>records[1]</code> must not be assumed to mean the root.</p>
+<h3>Option B: a table keyed by task ID</h3>
+<pre><code><span class="lua-kw">local</span> records = {
+  [<span class="lua-str">""</span>] = { state = <span class="lua-str">"working"</span> },
+  [<span class="lua-str">"build/test"</span>] = { state = <span class="lua-str">"blocked"</span> },
+}
+
+<span class="lua-kw">local</span> test = records[<span class="lua-str">"build/test"</span>]
+<span class="lua-kw">if</span> test <span class="lua-kw">then</span>
+  print(test.state)
+<span class="lua-kw">end</span></code></pre>
+<p>This is convenient when a config cares about one particular task. The key is its identity, and a missing task naturally reads as nil. Comparing snapshots by ID is also straightforward.</p>
+<p>The drawback is display order. Ordinary <code>pairs</code> traversal has no specified order, so stable presentation requires collecting and sorting keys. The root uses <code>records[""]</code>, and IDs with slashes need bracket indexing. <a href="https://www.lua.org/manual/5.4/manual.html#pdf-pairs">Lua iteration reference</a>.</p>
+<div class="scroll" role="region" aria-label="Lua snapshot comparison" tabindex="0"><table><thead><tr><th>Use</th><th>List</th><th>ID-keyed table</th></tr></thead><tbody>
+<tr><td>Draw all tasks</td><td>Direct iteration with ipairs.</td><td>Sort keys for a reliable order.</td></tr>
+<tr><td>Find one task</td><td>Search by record.id.</td><td>Direct lookup by key.</td></tr>
+<tr><td>Identity</td><td>The id field. Index positions are temporary.</td><td>The table key.</td></tr>
+<tr><td>Root missing</td><td>No entry whose id is empty.</td><td>The empty-string key returns nil.</td></tr>
+<tr><td>Likely first demo</td><td>Convenient for tab summaries and debugging.</td><td>Convenient for configs tracking named workers.</td></tr>
+</tbody></table></div>
+<p>Recommendation: Option A for the first version, because the immediate job is producing tab indicators from the available tasks. A small Lua helper can provide ID lookup later. Option B is a reasonable choice if direct task lookup is the main interface you want to present.</p>
+<p class="small">Decision still open. The record set is bounded, so usability is the main consideration. Neither choice determines which state gets priority in a tab; that is a separate presentation decision.</p>
+</section>
+<section id="ghostty">
+<h2>What upstream Ghostty actually implements</h2>
+<p>At revision <code>291fd050b9e9</code>, libghostty-vt validates reports and delivers them to its host. The Ghostty app's stream handler still ignores the action. The upstream change merged on 6 October 2026. <a href="https://github.com/ghostty-org/ghostty/pull/14560">Mitchell's implementation PR</a>.</p>
+<div class="scroll" role="region" aria-label="Ghostty implementation and WezTerm mapping" tabindex="0"><table><thead><tr><th>Layer</th><th>Verified Ghostty behavior</th><th>Proposed WezTerm equivalent</th></tr></thead><tbody>
+<tr><td>Parse</td><td>A dedicated parser produces a query or validated report. It checks sizes, IDs, base64, UTF-8, and control characters.</td><td>Typed OSC 7501 commands in <code>wezterm-escape-parser</code>, with no GUI dependency.</td></tr>
+<tr><td>Deliver</td><td>A synchronous <code>program_status</code> callback receives reports. Borrowed data must be copied to retain it.</td><td>Owned Rust values for storage and mux messages.</td></tr>
+<tr><td>Advertise</td><td>Only a registered consumer enables the capability reply. The reply uses the query's terminator.</td><td>Advertise support once pane handling works, including in a headless mux.</td></tr>
+<tr><td>Retain</td><td>The host owns records, replacement, inheritance, clearing, eviction, prompt cleanup, and exit cleanup. The library sends a root clear on full reset.</td><td>A per-pane store reachable by the mux, plus reconnect snapshots.</td></tr>
+<tr><td>Present</td><td>The upstream app has no OSC 7501 presentation policy in this handler.</td><td>Lua access and change events; choose indicators and notifications separately.</td></tr>
+</tbody></table></div>
+<p>This refines the ownership recommendation below. Keep the parser stateless; put durable records in WezTerm's per-pane Rust model. Lua should read snapshots and react to changes.</p>
+<p class="small">Source review, not an executed Ghostty build. Verified at the pinned revision: <a href="https://github.com/ghostty-org/ghostty/blob/291fd050b9e9c293c8adb6a140742649b7e42d3a/src/terminal/osc/parsers/program_status.zig">parser</a>, <a href="https://github.com/ghostty-org/ghostty/blob/291fd050b9e9c293c8adb6a140742649b7e42d3a/src/terminal/stream_terminal.zig#L969">library dispatch</a>, <a href="https://github.com/ghostty-org/ghostty/blob/291fd050b9e9c293c8adb6a140742649b7e42d3a/include/ghostty/vt/terminal.h#L1316">host callback contract</a>, and <a href="https://github.com/ghostty-org/ghostty/blob/291fd050b9e9c293c8adb6a140742649b7e42d3a/src/termio/stream_handler.zig#L386">app handler</a>.</p>
+</section>
+<section id="fixed">
+<h2>What the specification already decides</h2>
+<div class="note"><p>Reports replace records per pane. IDs support a hierarchy. <code>clear</code> removes a subtree. Prompt start and attached-process exit remove <code>working</code> and <code>blocked</code>; <code>done</code> and <code>error</code> survive. Full reset clears all records. Parsing, capability replies, text validation, and limits also have defined rules. <a href="https://www.superlogical.com/rex/docs/build/program-status">Protocol specification, revision 0.4</a>.</p></div>
+<p>We should test those rules directly. Most of our freedom lies in architecture and presentation.</p>
+</section>
+<section id="choices">
+<h2>The implementation choices</h2>
+<p>These are recommendations for a first native implementation. Each choice affects either reliability, configuration, or the amount of work.</p>
+<div class="scroll" role="region" aria-label="Implementation decision table" tabindex="0">
+<table><thead><tr><th>Decision</th><th>Alternatives</th><th>Recommended starting point</th></tr></thead><tbody>
+<tr><td>Protocol integration</td><td>Native Rust support or an OSC 1337 compatibility bridge</td><td>Native parsing in <code>wezterm-escape-parser</code>. A bridge is useful for a demo but changes what applications must emit.</td></tr>
+<tr><td>State ownership</td><td>GUI memory, Lua globals, or terminal state</td><td>Keep typed records with the terminal. Let the mux distribute snapshots and changes to clients.</td></tr>
+<tr><td>Lua interface</td><td>Raw text, reserved user variables, or structured records</td><td>A proposed <code>pane:get_program_status()</code> plus a change event. Include a revision so clients can ignore stale updates.</td></tr>
+<tr><td>Scope of first release</td><td>Local panes only or complete mux support</td><td>Prototype locally, then include remote panes and reconnect snapshots before calling the feature complete.</td></tr>
+<tr><td>Tab display</td><td>One priority status or separate activity and attention indicators</td><td>Show activity and attention separately. A blocked child should remain visible while another task works.</td></tr>
+<tr><td>Completion acknowledgement</td><td>Focus, keyboard input, or explicit dismissal; shared or per client</td><td>Start with explicit dismissal per GUI client. Keep the application record intact; hide only the completed indicator in that client.</td></tr>
+<tr><td>Notifications</td><td>Every update, selected transitions, or opt-in Lua behavior</td><td>Opt-in notifications for background panes. Deduplicate and rate-limit alerts; do not replay them on reconnect.</td></tr>
+<tr><td>Compatibility</td><td>Map old progress reports into this model or keep them independent</td><td>Defer the optional OSC 9;4 mapping. Test SSH and tmux passthrough separately.</td></tr>
+<tr><td>Defaults and delivery</td><td>Experimental flag or default support; upstream PR or maintained fork</td><td>Use a flag during development. Aim for upstream Rust support and a small Lua example, with parsing enabled by default once verified.</td></tr>
+</tbody></table>
+</div>
+<p class="small">WezTerm already has a pattern for pane data, Lua events, tab formatting, and mux propagation. The proposed API should fit those conventions. <a href="https://wezterm.org/recipes/passing-data.html">Existing WezTerm facilities</a>.</p>
+</section>
+<section id="example">
+<h2>Worked example: one tab can need you and keep working</h2>
+<p>Step through the reports, then dismiss the completion indicator. Notice that dismissal changes the proposed GUI behavior while retaining the stored result.</p>
+<div class="terminal" aria-label="Illustrative tab and records">
+<div class="tabstrip"><span class="tabname">deploy</span><span id="activity" class="signal working">Working</span><span id="attention" class="signal" hidden></span></div>
+<div class="terminalbody"><div id="event" class="event">root reports working</div><div id="records" class="records"><div class="record"><span>root</span><span>working</span></div></div><p id="explain">The pane stores an active root record.</p></div>
+</div>
+<div class="controls"><button id="back" type="button" disabled>Previous</button><button id="next" class="primary" type="button">Next report</button><button id="reset" type="button">Reset example</button><button id="dismiss" type="button" disabled>Dismiss completion</button><span id="step" class="small">Step 1 of 5</span></div>
+<p class="small">Curated example. The records follow the spec; the two indicators and per-client dismissal are our proposed policy. This is not a WezTerm emulator.</p>
+<details><summary>Read the example without the controls</summary><ol class="steps"><li>The root reports working.</li><li>A child reports blocked. The tab shows activity and attention.</li><li>The child clears itself. Attention disappears.</li><li>The root reports done. Completion remains visible.</li><li>A new shell prompt leaves the completed record in place. Dismissal hides its indicator for this client.</li></ol></details>
+</section>
+<section id="check">
+<h2>Check the design</h2>
+<div class="quiz">
+<div class="question" data-answer="1"><h3>Where should the authoritative records live?</h3><div class="answers"><button type="button" data-value="0">Only in Lua globals</button><button type="button" data-value="1">With terminal state</button></div><p class="feedback" aria-live="polite"></p><p class="small">Our recommendation gives attached clients one source of truth.</p></div>
+<div class="question" data-answer="0"><h3>A child needs input while another task works. What should the tab convey?</h3><div class="answers"><button type="button" data-value="0">Both activity and attention</button><button type="button" data-value="1">Only the newest report</button></div><p class="feedback" aria-live="polite"></p><p class="small">A display policy should preserve useful information across tasks.</p></div>
+<div class="question" data-answer="1"><h3>A client reconnects and receives a snapshot. Should it replay every alert?</h3><div class="answers"><button type="button" data-value="0">Yes, all alerts</button><button type="button" data-value="1">No, restore the current display</button></div><p class="feedback" aria-live="polite"></p><p class="small">Restoring state and announcing a new transition serve different purposes.</p></div>
+</div>
+<noscript><p>The recommended answers are terminal state, both indicators, and restoring the current display without replaying alerts.</p></noscript>
+</section>
+<footer><p>First settle ownership, the Lua contract, acknowledgement, and notification defaults. Those choices shape the rest of the implementation.</p><p class="small">Online references are optional. This file works offline. <a href="https://github.com/wezterm/wezterm/blob/main/term/src/terminalstate/performer.rs">WezTerm terminal handler</a>. The design recommendations are our own; current upstream acceptance is unverified.</p></footer>
+</main>
+<script>
+const frames=[
+{event:'root reports working',records:[['root','working']],activity:'Working',attention:'',explain:'The pane stores an active root record.'},
+{event:'eu-west reports blocked',records:[['root','working'],['eu-west','blocked']],activity:'Working',attention:'Needs input',explain:'Both records remain relevant. The proposed tab shows activity and attention at the same time.'},
+{event:'eu-west reports clear',records:[['root','working']],activity:'Working',attention:'',explain:'The child is gone. The root still works.'},
+{event:'root reports done',records:[['root','done']],activity:'',attention:'Completed',explain:'The activity indicator stops. The completion indicator waits for acknowledgement.'},
+{event:'a new shell prompt begins',records:[['root','done']],activity:'',attention:'Completed',explain:'The completed record survives. Dismissal is a client display choice, not a fabricated application report.'}
+];
+let current=0,seen=false;
+const el=id=>document.getElementById(id);
+function render(){const f=frames[current];el('event').textContent=f.event;el('explain').textContent=f.explain;el('records').replaceChildren(...f.records.map(([id,state])=>{const row=document.createElement('div');row.className='record';const name=document.createElement('span'),value=document.createElement('span');name.textContent=id;value.textContent=state;value.className=state;row.append(name,value);return row;}));el('activity').textContent=f.activity;el('activity').hidden=!f.activity;el('attention').hidden=!f.attention||seen;el('attention').textContent=f.attention;el('attention').className='signal '+(current===1?'blocked':'done');el('back').disabled=current===0;el('next').disabled=current===frames.length-1;el('dismiss').disabled=current<3||seen;el('step').textContent='Step '+(current+1)+' of '+frames.length+(seen?' / completion dismissed':'');}
+el('next').addEventListener('click',()=>{current++;seen=false;render();});el('back').addEventListener('click',()=>{current--;seen=false;render();});el('reset').addEventListener('click',()=>{current=0;seen=false;render();});el('dismiss').addEventListener('click',()=>{seen=true;render();});
+el('theme').addEventListener('click',()=>{const dark=document.documentElement.dataset.theme?document.documentElement.dataset.theme==='dark':matchMedia('(prefers-color-scheme: dark)').matches;document.documentElement.dataset.theme=dark?'light':'dark';el('theme').textContent=dark?'Use dark theme':'Use light theme';});
+const explanations=['Terminal-owned records survive GUI attachment changes and can be shared through the mux. Lua reads the data and decides how to present it.','Separate indicators prevent a running task from concealing a task that needs input.','A reconnect snapshot restores current state. Replaying old notifications would create repeated alerts.'];
+document.querySelectorAll('.question').forEach((q,index)=>q.querySelectorAll('button').forEach(button=>button.addEventListener('click',()=>{const correct=button.dataset.value===q.dataset.answer;const feedback=q.querySelector('.feedback');feedback.textContent=(correct?'Correct. ':'Try again. ')+explanations[index];feedback.className='feedback '+(correct?'done':'error');})));
+render();
+</script>
+</body>
+</html>
