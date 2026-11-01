@@ -19,6 +19,7 @@ local colors = {
   done = '#94dfbe', idle = '#b5ccdc',
 }
 local formatted_records = {}
+local notification_arms = {}
 local result_dir = os.getenv 'OSC7501_ALPHA_RESULT_DIR'
 
 local function safe_label(text)
@@ -41,7 +42,16 @@ wezterm.on('format-tab-title', function(tab)
   local count = 0
   for _, pane in ipairs(tab.panes) do
     local records = pane.program_status or {}
-    if result_dir then formatted_records[pane.pane_id] = records end
+    if result_dir then
+      formatted_records[pane.pane_id] = records
+      -- Arm only after the SetUserVar-triggered title refresh has reached us.
+      -- The shell sends the new report after the acknowledgement timer fires.
+      local arm = notification_arms[pane.pane_id]
+      if arm then
+        notification_arms[pane.pane_id] = nil
+        wezterm.time.call_after(0.2, arm)
+      end
+    end
     for _, record in ipairs(records) do
       count = count + 1
       if not selected or priorities[record.state] > priorities[selected.state] then
@@ -103,10 +113,14 @@ if result_dir then
     local attempts = 0
     local function check()
       attempts = attempts + 1
-      local actual = pane:get_program_status()
-      local problem = compare(actual, request.expected)
       local title_records = formatted_records[pane:pane_id()]
-      if not problem then
+      -- The notification case reads only what the formatter already observed.
+      -- It must not trigger a title refresh or send another user-variable event.
+      local actual = request.notification_only and (title_records or {}) or pane:get_program_status()
+      local problem = compare(actual, request.expected)
+      if request.notification_only and not title_records then
+        problem = 'no title-formatting snapshot observed'
+      elseif not problem and not request.notification_only then
         if title_records then problem = compare(title_records, request.expected)
         else problem = 'no title-formatting snapshot observed' end
       end
@@ -114,18 +128,28 @@ if result_dir then
         wezterm.time.call_after(0.1, check)
         return
       end
-      local result = { ok = problem == nil, case = request.case, problem = problem, actual = actual }
+      local result = { ok = problem == nil, case = request.case, problem = problem, actual = actual,
+        source = request.notification_only and 'formatter_cache_only' or 'pane_and_formatter' }
       local file, err = io.open(result_dir .. '/' .. request.case .. '.json', 'w')
       if not file then wezterm.log_error(err); return end
       file:write(wezterm.serde.json_encode(result))
       file:close()
       if request.complete then
         local complete = assert(io.open(result_dir .. '/complete.json', 'w'))
-        complete:write(wezterm.serde.json_encode({ ok = result.ok, checks = 11, error = problem }))
+        complete:write(wezterm.serde.json_encode({ ok = result.ok, checks = 12, error = problem }))
         complete:close()
       end
     end
-    wezterm.time.call_after(0.2, check)
+    if request.notification_only then
+      notification_arms[pane:pane_id()] = function()
+        local armed = assert(io.open(result_dir .. '/' .. request.case .. '-armed.json', 'w'))
+        armed:write(wezterm.serde.json_encode({ armed = true }))
+        armed:close()
+        wezterm.time.call_after(0.2, check)
+      end
+    else
+      wezterm.time.call_after(0.2, check)
+    end
   end)
 end
 

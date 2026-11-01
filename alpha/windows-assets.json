@@ -1,0 +1,22 @@
+[
+  {
+    "path": "assets/windows/angle/libEGL.dll",
+    "sha256": "21a18f35147c0c1413c94a6354a9b5e4f58cddb54d2adac664a6478e47df054b"
+  },
+  {
+    "path": "assets/windows/angle/libGLESv2.dll",
+    "sha256": "7360d7e4d2ed34d1b6224fcb00592db3f86827bb75106a89dc457504df188618"
+  },
+  {
+    "path": "assets/windows/conhost/OpenConsole.exe",
+    "sha256": "55b18996761c88c351820e82508e05ab0ec2194aeead20724fdfaeedec076ef4"
+  },
+  {
+    "path": "assets/windows/conhost/conpty.dll",
+    "sha256": "375bfb0479b6c53836ab307e3f9fd17bedbd733f2e9690943d0f12e72fb80777"
+  },
+  {
+    "path": "assets/windows/mesa/opengl32.dll",
+    "sha256": "d109ab0e8f7aa6f00992368b72c9a8aa0cf6d1b1563c3ab1caedbdba9c4476ba"
+  }
+]

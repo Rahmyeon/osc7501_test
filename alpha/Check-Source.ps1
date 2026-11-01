@@ -1,5 +1,5 @@
 $ErrorActionPreference = 'Stop'
-$sourceDirectory = Join-Path (Split-Path $PSScriptRoot -Parent) '.research/wezterm'
+$sourceDirectory = Split-Path $PSScriptRoot -Parent
 $logDirectory = Join-Path $PSScriptRoot 'source-checks'
 [void](New-Item -ItemType Directory -Path $logDirectory -Force)
 $checks = @(

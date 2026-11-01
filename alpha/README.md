@@ -23,9 +23,9 @@ Press **Ctrl+Shift+U** in that window to log the active pane's snapshot and open
 .\alpha\Start-Alpha.ps1 -Mode Smoke -Wait
 ```
 
-A fresh alpha window runs eleven checks. The launcher prints `PASS: 11 native GUI/Lua checks` when they pass. Each case checks both `pane:get_program_status()` and the data observed by the tab formatter. Results are saved under `alpha/test-results/<run-id>/` with actual record values for diagnosis. The window remains open for inspection.
+A fresh alpha window runs twelve checks. The launcher prints `PASS: 12 native GUI/Lua checks` when they pass. Most cases check both `pane:get_program_status()` and the data observed by the tab formatter. One case arms an expectation before emitting status-only output, then checks cached formatter data without the user-variable event that could otherwise cause an unrelated refresh. Results are saved under `alpha/test-results/<run-id>/` with actual record values for diagnosis. The window remains open for inspection. For an unattended run, add `-CloseAfterTest`; in Smoke mode this also implies `-Wait`.
 
-The checks cover empty state, working progress, nested records and inherited app, invalid-report rejection, complete replacement, BEL framing, soft reset, alternate-screen preservation, clear-prefix boundaries, prompt cleanup and full reset. The final check actually exits the attached PowerShell process and verifies that working/blocked records disappear while done remains. The eleven checks group some related cases together.
+The checks cover empty state, working progress, nested records and inherited app, invalid-report rejection, complete replacement, BEL framing, soft reset, alternate-screen preservation, clear-prefix boundaries, prompt cleanup and full reset. The final check actually exits the attached PowerShell process and verifies that working/blocked records disappear while done remains. The twelve checks group some related cases together.
 
 This test-only handshake uses WezTerm's existing user-variable event and local JSON result files. It adds no OSC 7501 response command. All protocol replies remain limited to capability detection.
 
@@ -94,23 +94,10 @@ The root ID is the empty string. `app` is the explicit report value. `effective_
 
 ## Rebuild after source changes
 
-The implementation is in `.research/wezterm`, branch `osc7501-local-status`. The clean `wezterm/` clone remains a reference.
+This branch contains the modified source at the repository root. Follow the root README to restore the pinned Windows runtime assets and initialize native submodules before building.
 
 ```powershell
 .\alpha\Package-Alpha.ps1
 ```
 
-Close windows running the alpha before replacing its binaries. The package script includes the native runtime DLLs and helpers, not just the GUI executable. `build-info.json` records the baseline revision and binary hashes.
-
-For focused source checks, run these in `.research/wezterm`:
-
-```powershell
-cargo test -p wezterm-escape-parser --lib --offline
-cargo test -p wezterm-escape-parser --lib --features std --offline
-cargo test -p wezterm-term --lib --offline
-cargo check -p mux -p mux-lua -p wezterm-client -p wezterm-mux-server-impl --offline
-```
-
-Alternatively, run `.\alpha\Check-Source.ps1` from the project directory. It checks the framing parser, its heapless configuration, the escape parser with and without std, terminal integration and the Lua data contract, saving logs under `alpha/source-checks/`. Cargo may need to download dependencies the first time, so a missing offline dependency should be fetched before rerunning.
-
-See `TEST_RESULTS.md` for checks actually performed on this alpha. Report the failing case, expected result, observed result and its JSON output when asking for a fix.
+Close alpha windows before replacing their binaries. The package script copies the built runtime into the ignored alpha/bin directory. Run .\alpha\Check-Source.ps1 for focused checks. These offline commands require dependencies to have been fetched first.

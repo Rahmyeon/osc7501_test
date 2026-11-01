@@ -28,7 +28,7 @@
 <p>In your original PowerShell window:</p>
 <pre><code>cd C:\Users\omotu\projects\osc7501
 .\alpha\Start-Alpha.ps1 -Mode Smoke -Wait</code></pre>
-<p class="expect">Pass: a new alpha window opens, and the original PowerShell prints “PASS: 11 native GUI/Lua checks.”</p>
+<p class="expect">Pass: a new alpha window opens, and the original PowerShell prints “PASS: 12 native GUI/Lua checks.”</p>
 <p>The smoke shell exits on purpose during the last check. Its window stays open because the alpha holds exited panes. That is expected. Close that test window afterward.</p>
 <p>These checks exercise incoming reports, stored records, Lua access and the data seen by the tab formatter. They do not prove that labels fit, colors are readable or inactive tabs look right.</p>
 <label class="check"><input type="checkbox" data-check="smoke">Automated smoke test passed</label>
@@ -224,7 +224,7 @@ Smoke result directory, if relevant:</textarea>
 <p>These questions are optional. They help connect the observations to the architecture.</p>
 <fieldset data-answer="b"><legend>The snapshot says blocked, but the tab still says working. Where would you investigate first?</legend><button type="button" data-choice="a">Only the parser</button><button type="button" data-choice="b">Presentation and refresh</button><p class="feedback" aria-live="polite"></p><details><summary>Explanation</summary><p>The current snapshot already contains blocked. Investigate the tab's selection policy and the path that requests a refresh before changing parsing.</p></details></fieldset>
 <fieldset data-answer="a"><legend>The new report omits title and the old title disappears. Is that a failure?</legend><button type="button" data-choice="a">No, reports replace records</button><button type="button" data-choice="b">Yes, omitted fields must stay</button><p class="feedback" aria-live="polite"></p><details><summary>Explanation</summary><p>A report replaces the record with that ID. Omitted optional fields disappear. This keeps an old permission reason from surviving after a task changes state.</p></details></fieldset>
-<fieldset data-answer="b"><legend>All eleven smoke checks pass. Have we proven the tab is readable at a narrow width?</legend><button type="button" data-choice="a">Yes</button><button type="button" data-choice="b">No, inspect the layout</button><p class="feedback" aria-live="polite"></p><details><summary>Explanation</summary><p>The smoke checks compare data. Text can be correct and still overlap or truncate badly. Manual visual checks test that separate property.</p></details></fieldset>
+<fieldset data-answer="b"><legend>All twelve smoke checks pass. Have we proven the tab is readable at a narrow width?</legend><button type="button" data-choice="a">Yes</button><button type="button" data-choice="b">No, inspect the layout</button><p class="feedback" aria-live="polite"></p><details><summary>Explanation</summary><p>The smoke checks compare data. Text can be correct and still overlap or truncate badly. Manual visual checks test that separate property.</p></details></fieldset>
 </section>
 <footer><p class="meta">Based on the packaged alpha's Start-Alpha.ps1, Exercise-Alpha.ps1, alpha.lua and README.md. Prior completed checks are recorded in TEST_RESULTS.md. This guide does not mark new manual tests as completed.</p></footer>
 </main>

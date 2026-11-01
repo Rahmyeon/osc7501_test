@@ -1,0 +1,155 @@
+<!doctype html>
+<html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1"><title>How our OSC 7501 implementation works</title><style>
+:root{color-scheme:light;--bg:#f4f7fa;--paper:#fff;--ink:#172d3f;--muted:#35566d;--accent:#1f4f75;--line:#c9d7e2;--good:#155b42;--warn:#774900}
+@media(prefers-color-scheme:dark){:root{color-scheme:dark;--bg:#101b24;--paper:#172733;--ink:#e8f1f8;--muted:#b5ccdc;--accent:#9ecbed;--line:#354e60;--good:#94dfbe;--warn:#f6cc7d}}
+:root[data-theme="light"]{color-scheme:light;--bg:#f4f7fa;--paper:#fff;--ink:#172d3f;--muted:#35566d;--accent:#1f4f75;--line:#c9d7e2;--good:#155b42;--warn:#774900}
+:root[data-theme="dark"]{color-scheme:dark;--bg:#101b24;--paper:#172733;--ink:#e8f1f8;--muted:#b5ccdc;--accent:#9ecbed;--line:#354e60;--good:#94dfbe;--warn:#f6cc7d}
+*{box-sizing:border-box}html{font-size:20px}body{margin:0;background:var(--bg);color:var(--ink);font:1rem/1.75 "Segoe UI",Arial,sans-serif}main{max-width:1100px;margin:auto;padding:1.8rem 1.4rem 4rem;display:grid;gap:2.8rem}header,section,article{display:grid;gap:1rem;min-width:0}h1,h2,h3,p{margin:0}h1,h2,h3{font-family:Bahnschrift,"Arial Narrow",Arial,sans-serif;line-height:1.25;text-wrap:balance}h1{font-size:2.1rem;max-width:26ch}h2{font-size:1.45rem}h3{font-size:1.12rem}p,li{max-width:66ch}a{color:var(--accent);text-underline-offset:.2em}.top,nav,.controls{display:flex;align-items:center;flex-wrap:wrap;gap:.6rem 1rem}.top{justify-content:space-between}.meta,.caption{color:var(--muted);font-size:.86rem}.caption{display:block;font-weight:600}.top .meta{font-family:Consolas,monospace}nav{font-size:.92rem}button{font:inherit;font-size:.92rem;line-height:1.4;border:1px solid var(--accent);border-radius:3px;background:var(--paper);color:var(--accent);padding:.5rem .75rem;cursor:pointer}button:hover{box-shadow:inset 0 0 0 1px var(--accent)}button:disabled{opacity:.5;cursor:default}:focus-visible{outline:3px solid var(--accent);outline-offset:4px}code,pre{font-family:Consolas,"Courier New",monospace}code{font-size:.94em;color:var(--accent);overflow-wrap:anywhere}pre{margin:0;padding:1rem;background:var(--paper);border:1px solid var(--line);font-size:.95rem;line-height:1.65;overflow-x:auto}pre code{color:var(--ink);overflow-wrap:normal}.str{color:var(--good)}.num{color:var(--warn)}.scroll{overflow-x:auto;max-width:100%}table{width:100%;border-collapse:collapse;font-size:.94rem}th,td{padding:.7rem .65rem;text-align:left;vertical-align:top;border-bottom:1px solid var(--line)}th{color:var(--muted);font-size:.9rem}.note,.demo,fieldset{padding:1.1rem 1.25rem;background:var(--paper);border:1px solid var(--line);display:grid;gap:.8rem;min-width:0}.code{display:grid;gap:.35rem}ul,ol{margin:0;padding-left:1.4rem}li+li{margin-top:.45rem}.demo header{gap:.5rem}.readouts{display:grid;grid-template-columns:1fr 1fr;gap:1rem}.readouts>div{display:grid;gap:.5rem;min-width:0}.readout{font:1rem/1.6 Consolas,monospace}.demo pre{font-size:.87rem;min-height:9rem}.demo output{display:block}.feedback{font-size:.95rem;color:var(--muted)}fieldset{margin:0}legend{padding:0 .4rem;font-weight:650}details{font-size:.95rem}summary{cursor:pointer;color:var(--accent)}footer{border-top:1px solid var(--line);padding-top:1rem;display:grid;gap:.6rem}.choices{display:flex;flex-wrap:wrap;gap:.55rem}@media(max-width:700px){html{font-size:18px}main{padding:1.2rem 1rem 3rem;gap:2.2rem}h1{font-size:1.85rem}.readouts{grid-template-columns:1fr}.scroll table{min-width:580px}}@media(prefers-reduced-motion:reduce){html{scroll-behavior:auto}}@media print{body{background:white;color:black}main{padding:0;gap:1.5rem}.interactive,button,nav{display:none}a,code,.meta,.caption{color:black}pre{white-space:pre-wrap;font-size:10pt}.scroll{overflow:visible}.scroll table{min-width:0}article,fieldset,.note{break-inside:avoid}}
+</style></head><body><main><header><div class="top"><span class="meta">Implementation study / presentation 2 Nov 2026</span><button id="theme" type="button">Switch theme</button></div>
+<h1>How our OSC 7501 implementation works</h1>
+<p>Prepared for the November 2, 2026 presentation. This guide explains our implementation and its tradeoffs. It does not claim that Wez Furlong chose or endorsed our additions.</p>
+<p>An agent knows that it is waiting for permission. The terminal sees only bytes unless the agent reports that fact. OSC 7501 gives those bytes a structured meaning. Our feature remembers the report and makes it available to Lua, which decides what the tab displays.</p>
+<nav aria-label="Study sections"><a href="#follow-one-task-through-the-system">Trace a report</a><a href="#which-decisions-were-ours">Decisions</a><a href="#trace">Interactive trace</a><a href="#lifetimes-require-events-from-outside-the-store">Lifetime bugs</a><a href="#check-your-understanding">Self-check</a></nav><p class="meta"><a href="OSC7501_IMPLEMENTATION_GUIDE.md">Markdown edition</a> · <a href="CODE_REVIEW.md">Code review</a> · <a href="alpha/TESTING_GUIDE.html">Testing checklist</a></p></header>
+<section id="follow-one-task-through-the-system"><h2>Follow one task through the system</h2>
+<p>Suppose a build&#x27;s tests need permission. It sends these reports. <code>ESC</code> and <code>ST</code> name control bytes:</p>
+<div class="code"><span class="caption">Reported bytes, shown symbolically</span><pre><code>ESC ] 7501 ; state=working:app=cargo:progress=25 ST
+ESC ] 7501 ; state=blocked:id=build/tests:kind=permission ST</code></pre></div>
+<p>The first report addresses the root because it omits <code>id</code>. The second addresses a child. Both records exist simultaneously.</p>
+<div class="scroll"><table><thead><tr><th>Layer</th><th>What it does with this example</th></tr></thead><tbody>
+<tr><td><code>vtparse</code></td><td>Recognizes a complete OSC sequence and retains its body.</td></tr>
+<tr><td>Escape parser</td><td>Validates the body and produces a typed <code>Command::Report</code>.</td></tr>
+<tr><td><code>TerminalState</code></td><td>Applies the report to its record store.</td></tr>
+<tr><td><code>LocalPane</code> and mux</td><td>Expose the records and schedule a change notification.</td></tr>
+<tr><td>Lua API and GUI snapshot</td><td>Provide owned record tables to consumers.</td></tr>
+<tr><td>Example tab formatter</td><td>Chooses blocked over working and displays the source pane.</td></tr>
+</tbody></table></div>
+<p>The resulting Lua data looks like this, with formatting simplified:</p>
+<div class="code"><span class="caption">Lua snapshot</span><pre><code>{
+  { id = <span class="str">&#x27;&#x27;</span>, state = <span class="str">&#x27;working&#x27;</span>, progress = <span class="num">25</span>,
+    app = <span class="str">&#x27;cargo&#x27;</span>, effective_app = <span class="str">&#x27;cargo&#x27;</span> },
+  { id = <span class="str">&#x27;build/tests&#x27;</span>, state = <span class="str">&#x27;blocked&#x27;</span>,
+    kind = <span class="str">&#x27;permission&#x27;</span>, effective_app = <span class="str">&#x27;cargo&#x27;</span> },
+}</code></pre></div>
+<p>The child inherits <code>effective_app</code> from the root despite the missing intermediate <code>build</code> record. The tab summarizes the records.</p>
+</section>
+
+<section id="trace"><h2>Watch the record store change</h2>
+<p>This illustrative trace uses one pane and a fixed sequence of valid reports. It explains replacement and clearing; it does not run Rust or test your alpha. The full sequence is also readable in the table below.</p>
+<div class="demo interactive"><div class="controls"><button id="previous" type="button">Previous report</button><button id="next" type="button">Next report</button><button id="reset" type="button">Reset trace</button><output id="position" aria-live="polite">Step 0 of 6</output></div>
+<div class="code"><span class="caption">Report applied in this step</span><pre><code id="report">No report yet.</code></pre></div>
+<div class="readouts"><div><span class="caption">Owned snapshot, sorted by ID</span><pre><code id="records">[]</code></pre></div><div><span class="caption">Example tab summary</span><output id="tab" class="readout">No task indicator</output><p id="reason">There are no stored records.</p></div></div></div>
+<div class="scroll"><table><thead><tr><th>Step</th><th>Report</th><th>Stored result and display</th></tr></thead><tbody>
+<tr><td>0</td><td>None</td><td>Empty store; no task indicator.</td></tr>
+<tr><td>1</td><td><code>state=working:app=cargo:progress=25</code></td><td>Root works at 25%; one record.</td></tr>
+<tr><td>2</td><td><code>state=blocked:id=build/tests:kind=permission</code></td><td>Root and child coexist. Child inherits cargo. Blocked wins.</td></tr>
+<tr><td>3</td><td><code>state=done:id=build/tests</code></td><td>Child's permission kind disappears. Root still works, so working wins.</td></tr>
+<tr><td>4</td><td><code>state=clear:id=build</code></td><td>Child disappears even though build itself had no record. Root remains.</td></tr>
+<tr><td>5</td><td><code>state=done</code></td><td>Root is replaced. Its omitted app and percentage disappear.</td></tr>
+<tr><td>6</td><td><code>state=clear</code></td><td>All records are removed.</td></tr>
+</tbody></table></div></section>
+
+<section id="which-decisions-were-ours"><h2>Which decisions were ours?</h2>
+<p>Some behavior comes from the protocol and must be implemented correctly. Other behavior is a design choice we can evaluate.</p>
+<div class="scroll"><table><thead><tr><th>Decision</th><th>Authority and consequence</th></tr></thead><tbody>
+<tr><td>D001: local native support first</td><td>You accepted this scope. Remote mux synchronization follows later.</td></tr>
+<tr><td>D002: <code>TerminalState</code> owns records</td><td>You accepted this owner. State remains testable without a GUI.</td></tr>
+<tr><td>D003: Lua receives a list sorted by task ID</td><td>You accepted this API. Iteration is deterministic; finding one ID requires a search.</td></tr>
+<tr><td>D004: separate local change notification</td><td>Our implementation choice. It avoids changing the serialized remote alert format for a local milestone.</td></tr>
+<tr><td>D005: protocol-specific framing safeguards</td><td>Our implementation choice. It bounds incomplete OSC 7501 input while preserving existing handling of unrelated OSCs.</td></tr>
+<tr><td>D006: late replacement after process exit</td><td>A review correction. Later transient reports supersede old results, then exit cleanup leaves that exact ID absent.</td></tr>
+<tr><td>Whole-record replacement, subtree clear, lifetime rules</td><td>Protocol requirements, not optional preferences.</td></tr>
+<tr><td>Blocked outranks error in a tab</td><td>Example Lua policy. A different formatter can choose differently.</td></tr>
+</tbody></table></div>
+<p>See <a href="DECISIONS.md">DECISIONS.md</a> for the alternatives and <a href="WEZTERM_DESIGN_GUIDE.md">the WezTerm design guide</a> for upstream evidence, with inference labeled separately from stated author rationale.</p>
+</section>
+<section id="parsing-makes-a-safe-instruction"><h2>Parsing makes a safe instruction</h2>
+<p>There are two parsing jobs. <a href="vtparse/src/lib.rs">vtparse</a> recognizes framing across arbitrary input chunks. A read may end halfway through a sequence, including between the two bytes of <code>ESC \</code>. The <a href="wezterm-escape-parser/src/program_status.rs">report parser</a> interprets the complete body.</p>
+<p>Its <code>Command</code> enum has two alternatives: <code>Query</code> and <code>Report</code>. The report uses a <code>State</code> enum and an optional <code>Kind</code> enum. Rust must handle named cases instead of repeatedly comparing strings across the program.</p>
+<p>Optional fields use <code>Option&lt;T&gt;</code>. For example, <code>Option&lt;u8&gt;</code> distinguishes a known percentage from no percentage. Zero means 0%; absence means indeterminate. <code>kind</code> applies only to blocked records, and <code>progress</code> applies only to working or blocked records.</p>
+<p>The parser validates before returning a report. An invalid explicit ID rejects the report instead of accidentally targeting the root. Invalid base64 or decoded control characters also reject the whole report. Unknown keys and many malformed pairs are ignored according to the protocol. Ignoring a pair and rejecting a report are different operations.</p>
+<p>Text is decoded into owned Rust strings. Those strings remain valid after the input buffer is reused. The parser crate retains its existing <code>no_std</code> configuration with allocation, so it does not require the full standard library merely to understand this protocol.</p>
+<p>The sequence limit is 4096 bytes. The alpha conservatively reserves two terminator bytes even when BEL is used. We also bound input while it is still arriving. Waiting until the report is complete would allow an unterminated sequence to accumulate memory first.</p>
+<p>The review found another boundary problem: low-level parsing could silently drop certain malformed bytes inside an ID. For example, removing a bad byte from <code>bad&lt;byte&gt;id</code> could manufacture the legitimate ID <code>badid</code>. The fix preserves malformed input for validation instead of repairing its meaning. This matters especially for a clear report, which could otherwise remove a real task. D005&#x27;s exception remains a tradeoff that deserves upstream review.</p>
+<p>Incomplete UTF-8 could also consume a following colon, hiding an ID field. Recognized OSC 7501 bodies now retain invalid high bytes directly, keeping separators independent. The wire body is ASCII; human text uses base64. Supported terminators are BEL and ESC-backslash. A raw C1 terminator cancels the report.</p>
+</section>
+<section id="storage-and-the-public-api-need-different-shapes"><h2>Storage and the public API need different shapes</h2>
+<p>The <a href="term/src/program_status.rs">record store</a> contains a <code>HashMap&lt;String, Report&gt;</code> and a <code>VecDeque&lt;String&gt;</code>.</p>
+<p>The map finds a record by its ID. The queue records update order, with the oldest update first. We chose 256 records, the protocol&#x27;s stated cap; implementations must support at least 64. Creating a record past the cap evicts the least recently updated record.</p>
+<p>Updating an identical report still refreshes its recency. That does not mean the visible data changed. The store returns a boolean describing the content change, allowing the caller to avoid an unnecessary notification.</p>
+<p>A queue update scans at most 256 IDs. A more elaborate linked structure could avoid that scan, but would add bookkeeping and more ways to break the map/queue relationship. The small bound makes the simple implementation reasonable. This is an engineering tradeoff, not a claim that linear scans are always best.</p>
+<p>For Lua, we copy records into a vector and sort by ID. This gives stable ordering without requiring the internal map to preserve order. A keyed Lua table would make direct lookup easier; the accepted list is convenient for drawing tabs. Its numeric positions are not identities. Always identify a task by <code>record.id</code>.</p>
+<p>The snapshot owns its data. Changing a returned Lua table does not modify Rust&#x27;s records. The terminal lock is released before Lua conversion or rendering. This avoids keeping the model locked while consumer code runs.</p>
+</section>
+<section id="replacement-clearing-and-inheritance"><h2>Replacement, clearing and inheritance</h2>
+<p>These three operations have different meanings:</p>
+<div class="code"><span class="caption">Reported bytes, shown symbolically</span><pre><code>state=done:id=build/tests</code></pre></div>
+<p>This replaces only <code>build/tests</code>. Its previous <code>kind</code>, title and message disappear if omitted. It does not alter children. Retaining omitted fields would leave stale information, such as a permission reason on a completed task.</p>
+<div class="code"><span class="caption">Reported bytes, shown symbolically</span><pre><code>state=clear:id=build</code></pre></div>
+<p>This removes <code>build</code> and descendants such as <code>build/tests</code>. It leaves <code>builder</code> alone because the slash is a path boundary. The parent need not exist. Clearing an absent subtree succeeds as a no-op. Omitting <code>id</code> clears every record.</p>
+<p>App inheritance is computed when building a snapshot. A child first uses its own explicit app; otherwise we walk toward the root to find the nearest ancestor with one. We retain both <code>app</code> and <code>effective_app</code> so consumers can distinguish explicit input from derived data.</p>
+<p>Copying the parent&#x27;s app permanently into each child would become stale when that parent changes or is evicted. Computing it dynamically avoids rewriting all descendants. The short bounded IDs keep ancestor traversal small.</p>
+</section>
+<section id="state-changes-and-notifications-are-separate"><h2>State changes and notifications are separate</h2>
+<p><a href="term/src/terminalstate/mod.rs">TerminalState</a> owns the store. Its <a href="term/src/terminalstate/performer.rs">performer</a> handles the typed command. After a visible mutation, it invokes <code>program_status_changed</code> on the notification handler.</p>
+<p><a href="mux/src/localpane.rs">LocalPane</a> schedules delivery on the main thread. This is necessary because terminal actions can execute while the terminal mutex is held. Calling a consumer immediately could make it request a snapshot and try to acquire the same lock again.</p>
+<p>The local <code>MuxNotification::ProgramStatusChanged</code> says that a pane&#x27;s data changed. Consumers then read a fresh snapshot. The notification is not the only copy of the data, so a consumer does not need every past event to understand the present.</p>
+<p>We deliberately did not add a variant to the serialized <code>Alert</code> enum. That type also participates in remote transport. A default empty pane getter and an ignored local notification do not implement remote synchronization. Remote support needs an initial snapshot, subsequent updates and reconnection behavior.</p>
+<p>The capability query receives a fixed reply through the terminal&#x27;s writer. That reply describes support; it contains no task IDs, messages or stored records. Reading snapshots through local Lua is separate from replying to programs over the terminal stream.</p>
+</section>
+<section id="lifetimes-require-events-from-outside-the-store"><h2>Lifetimes require events from outside the store</h2>
+<p>Records belong to a terminal, not to its current screen. Entering a full-screen application or returning from it preserves them. A soft reset also preserves them. A full RIS reset clears them.</p>
+<p>OSC 133 A announces a new shell prompt. The terminal then removes working and blocked records. Done and error survive. This implementation also retains idle records, which the protocol permits. Printing an ordinary prompt without that marker cannot trigger this cleanup.</p>
+<p>The pane wrapper supplies attached-process exit because it owns the process. This means the process attached to the pane, often the shell. Returning from OpenCode to that still-running shell is not the shell&#x27;s exit.</p>
+<p>The review fixed a subtle ordering bug. Suppose the store remembers <code>done</code> for <code>build</code>, but buffered output says that <code>build</code> has started working again. The process-exit notification can arrive before those bytes are applied. Previously the sticky exit guard ignored the late working report, leaving the obsolete done record behind.</p>
+<p>The corrected rule combines replacement with cleanup: a late working or blocked report removes any existing record with that exact ID. It never revives active work after exit, and it preserves finished descendants. Repeating the late report after removal produces no additional visible change. Late done or error reports remain useful and can still be stored.</p>
+</section>
+<section id="lua-chooses-what-deserves-space-in-a-tab"><h2>Lua chooses what deserves space in a tab</h2>
+<p>The <a href="lua-api-crates/mux/src/pane.rs">Lua pane method</a> exposes <code>pane:get_program_status()</code>. The GUI separately adds the same record shape to pane information used during title formatting. Both connections are necessary.</p>
+<p>Our <a href="alpha/alpha.lua">example formatter</a> examines every split in a tab. It selects blocked, then error, working, done and idle. The first encountered record breaks a tie. It shows the source pane and record count, filters selected invisible formatting characters, and shortens the displayed label.</p>
+<p>That priority is not a protocol rule. Nor should WezTerm invent done when an application sends idle. An idle report means the app is waiting for another instruction; done means a completed result is ready to inspect. Your OpenCode observation should be checked against a fresh snapshot before attributing it to the formatter.</p>
+<p>The formatter must stay fast. It reads ready data rather than launching processes or making network requests. There is currently no dismissal interface, desktop notification policy or OS taskbar integration.</p>
+</section>
+<section id="how-we-test-the-boundaries"><h2>How we test the boundaries</h2>
+<p>Parser tests check complete and fragmented sequences, invalid input, limits and recovery after rejection. Model tests check replacement, clearing, inheritance, recency and independent snapshots. Terminal integration tests send real bytes through the terminal and exercise lifecycle hooks. Lua tests check the public table shape.</p>
+<p>Native smoke tests run the actual alpha and compare the live getter with data observed by the tab formatter. Manual tests cover layout, inactive tabs, splits, overlays and real applications. Passing data assertions cannot prove that text is readable or correctly positioned.</p>
+<p>One new smoke case arms a check before sending status-only output. During the observation period, it reads only cached formatter data. Earlier checks sent a user-variable event after each report, which could itself refresh the title. Removing that deliberate refresh makes the new check more useful, though unrelated window events can still refresh the display.</p>
+<p>The review added regression coverage for malformed-byte handling and late reports after exit. Consult <a href="alpha/TEST_RESULTS.md">test results</a> for actual execution results. Writing a test does not establish that it passes. Windows local support is the target; remote mux and other platforms require additional work.</p>
+<p>The local implementation is in <code>.research/wezterm</code>. That checkout is ignored by the outer repository. GitHub distributes the complete <a href="Cargo.toml">source patch</a>, with setup instructions in <a href="README.md">README.md</a>. Local source links in this guide work after recreating those checkouts.</p>
+</section>
+<section id="a-three-minute-presentation-route"><h2>A three-minute presentation route</h2>
+<ol>
+<li><strong>First minute:</strong> show a working task and a child awaiting permission. Explain that the program reports facts, TerminalState remembers them, and Lua chooses the summary.</li>
+<li><strong>Second minute:</strong> change the child to done, then clear its parent path. Explain whole-record replacement, simultaneous tasks and slash-boundary clearing.</li>
+<li><strong>Third minute:</strong> show the sorted Lua snapshot and describe one review fix. Explain why testing the parser alone would miss process-exit ordering. State that remote synchronization is deferred.</li>
+</ol>
+</section>
+<section id="small-glossary"><h2>Small glossary</h2>
+<ul>
+<li><strong>Report:</strong> one incoming instruction from a program.</li>
+<li><strong>Record:</strong> the current stored status for one ID.</li>
+<li><strong>Enum:</strong> a Rust type with named alternatives, such as working or blocked.</li>
+<li><strong>Snapshot:</strong> an owned copy of the current records for a consumer.</li>
+<li><strong>Mutex:</strong> a lock protecting shared state while a thread accesses it.</li>
+<li><strong>Notification:</strong> a signal to reread current state after it changes.</li>
+</ul>
+</section>
+<section id="check-your-understanding"><h2>Check your understanding</h2><p>Choose an answer to see feedback. Each explanation can also be opened without JavaScript.</p><fieldset data-answer="b"><legend>1. Why does the parser not clear build/tests itself?</legend><div class="choices"><button type="button" data-choice="a">The parser cannot understand slashes.</button><button type="button" data-choice="b">The store owns the records and applies their relationships.</button></div><p class="feedback" aria-live="polite"></p><details><summary>Read the explanation</summary><p>The parser validates the instruction. Clearing depends on the existing record set, which TerminalState owns.</p></details></fieldset><fieldset data-answer="a"><legend>2. A child changes from blocked to done and omits kind. Should permission remain?</legend><div class="choices"><button type="button" data-choice="a">No. The report replaces that record.</button><button type="button" data-choice="b">Yes. Only the state field changes.</button></div><p class="feedback" aria-live="polite"></p><details><summary>Read the explanation</summary><p>Whole-record replacement removes omitted fields. Keeping kind would preserve an obsolete permission reason.</p></details></fieldset><fieldset data-answer="a"><legend>3. Why refresh recency without always redrawing?</legend><div class="choices"><button type="button" data-choice="a">An identical report changes eviction order without changing visible data.</button><button type="button" data-choice="b">A redraw is required for every report.</button></div><p class="feedback" aria-live="polite"></p><details><summary>Read the explanation</summary><p>Update order matters for future eviction. A duplicate report can refresh that order while leaving the public snapshot unchanged.</p></details></fieldset><fieldset data-answer="b"><legend>4. After exit, a late working report names an ID with an old done record. What should the corrected store do?</legend><div class="choices"><button type="button" data-choice="a">Keep the old done record because the process has exited.</button><button type="button" data-choice="b">Remove the old record for that exact ID; retain finished descendants.</button></div><p class="feedback" aria-live="polite"></p><details><summary>Read the explanation</summary><p>The late report supersedes the previous result. Exit cleanup removes that transient replacement. The exact-ID removal must not clear independent finished descendants.</p></details></fieldset></section>
+<footer><p>The code review, implementation and test results are separate evidence. Read <a href="CODE_REVIEW.md">the review report</a> for findings and <a href="alpha/TEST_RESULTS.md">the verification report</a> for checks actually run.</p><p class="meta">Self-contained offline lesson. The trace is illustrative; it does not replace the Rust tests or native alpha. Local source links require the checkouts described in README.md.</p></footer></main><script>
+const trace = [
+  {report:'No report yet.', records:[], tab:'No task indicator', reason:'There are no stored records.'},
+  {report:'state=working:app=cargo:progress=25', records:[{id:'',state:'working',progress:25,app:'cargo',effective_app:'cargo'}], tab:'WORKING 25% | cargo | 1 record', reason:'Omitting id addresses the root. A known zero percentage and a missing percentage would mean different things.'},
+  {report:'state=blocked:id=build/tests:kind=permission', records:[{id:'',state:'working',progress:25,app:'cargo',effective_app:'cargo'},{id:'build/tests',state:'blocked',kind:'permission',effective_app:'cargo'}], tab:'BLOCKED:permission | cargo | 2 records', reason:'The missing build ancestor is allowed. The child inherits cargo from the root, and our Lua policy gives blocked priority.'},
+  {report:'state=done:id=build/tests', records:[{id:'',state:'working',progress:25,app:'cargo',effective_app:'cargo'},{id:'build/tests',state:'done',effective_app:'cargo'}], tab:'WORKING 25% | cargo | 2 records', reason:'The child is done and its old kind is gone. The root is still working, which outranks done in this formatter.'},
+  {report:'state=clear:id=build', records:[{id:'',state:'working',progress:25,app:'cargo',effective_app:'cargo'}], tab:'WORKING 25% | cargo | 1 record', reason:'Subtree clear removes build/tests. It does not require a build record and does not remove the root.'},
+  {report:'state=done', records:[{id:'',state:'done'}], tab:'DONE | task | 1 record', reason:'The new root report omits app and progress, so both disappear. There is no ancestor above the root to supply an inherited app.'},
+  {report:'state=clear', records:[], tab:'No task indicator', reason:'Clearing the root removes every record. A repeated clear would be a no-op.'}
+];
+let step = 0;
+function renderTrace(){const item=trace[step];document.querySelector('#position').textContent='Step '+step+' of '+(trace.length-1);document.querySelector('#report').textContent=item.report;document.querySelector('#records').textContent=JSON.stringify(item.records,null,2);document.querySelector('#tab').textContent=item.tab;document.querySelector('#reason').textContent=item.reason;document.querySelector('#previous').disabled=step===0;document.querySelector('#next').disabled=step===trace.length-1;}
+document.querySelector('#previous').addEventListener('click',()=>{step=Math.max(0,step-1);renderTrace();});
+document.querySelector('#next').addEventListener('click',()=>{step=Math.min(trace.length-1,step+1);renderTrace();});
+document.querySelector('#reset').addEventListener('click',()=>{step=0;renderTrace();});
+document.querySelector('#theme').addEventListener('click',()=>{const root=document.documentElement;const dark=root.dataset.theme?root.dataset.theme==='dark':matchMedia('(prefers-color-scheme: dark)').matches;root.dataset.theme=dark?'light':'dark';});
+document.querySelectorAll('fieldset[data-answer]').forEach(field=>field.querySelectorAll('[data-choice]').forEach(button=>button.addEventListener('click',()=>{const ok=button.dataset.choice===field.dataset.answer;field.querySelector('.feedback').textContent=ok?'Correct. The explanation connects this answer to the implementation.':'Try again. Read the explanation, then reconsider which component owns the information.';field.querySelector('details').open=true;})));
+renderTrace();
+</script></body></html>

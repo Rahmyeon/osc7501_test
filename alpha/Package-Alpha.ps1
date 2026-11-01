@@ -1,7 +1,6 @@
 param([switch]$SkipBuild)
 $ErrorActionPreference = 'Stop'
-$sourceDirectory = Join-Path (Split-Path $PSScriptRoot -Parent) '.research/wezterm'
-$exportScript = Join-Path (Split-Path $PSScriptRoot -Parent) '.research/export-alpha-patch.py'
+$sourceDirectory = Split-Path $PSScriptRoot -Parent
 if (-not $SkipBuild) {
     Push-Location $sourceDirectory
     try {
@@ -10,8 +9,6 @@ if (-not $SkipBuild) {
     }
     finally { Pop-Location }
 }
-& python $exportScript
-if ($LASTEXITCODE -ne 0) { throw 'Source patch export or clean-baseline validation failed.' }
 $binaryDirectory = Join-Path $PSScriptRoot 'bin'
 [void](New-Item -ItemType Directory -Path $binaryDirectory -Force)
 [void](New-Item -ItemType Directory -Path (Join-Path $binaryDirectory 'mesa') -Force)

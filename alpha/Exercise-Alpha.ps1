@@ -53,6 +53,36 @@ function Want([hashtable]$Values, [string[]]$Absent = @()) {
     @{ values = $Values; absent = @($Absent) }
 }
 
+function Assert-Notification([string]$Case, [string]$Body, [array]$Expected) {
+    $request = @{ case = $Case; expected = @($Expected); notification_only = $true } | ConvertTo-Json -Depth 10 -Compress
+    $encoded = Encode-Text $request
+    # Existing checks have established the subscription. Do not retry this
+    # request: a late retry could cause an unrelated title refresh after Body.
+    [Console]::Write("$escapeByte]1337;SetUserVar=osc7501_alpha_check=$encoded$escapeByte\")
+    $armedPath = Join-Path $env:OSC7501_ALPHA_RESULT_DIR "$Case-armed.json"
+    $resultPath = Join-Path $env:OSC7501_ALPHA_RESULT_DIR "$Case.json"
+    $deadline = [DateTime]::UtcNow.AddSeconds(15)
+    while (-not (Test-Path -LiteralPath $armedPath)) {
+        if ([DateTime]::UtcNow -ge $deadline) { throw "Timed out arming $Case." }
+        Start-Sleep -Milliseconds 50
+    }
+    # Only status bytes follow the acknowledgement, until the cached formatter
+    # assertion completes. No user-variable event or text output can mask it.
+    Send-Status $Body
+    $deadline = [DateTime]::UtcNow.AddSeconds(15)
+    while ([DateTime]::UtcNow -lt $deadline) {
+        if (Test-Path -LiteralPath $resultPath) {
+            try { $result = Get-Content -Raw -LiteralPath $resultPath | ConvertFrom-Json }
+            catch { Start-Sleep -Milliseconds 50; continue }
+            if (-not $result.ok) { throw "$Case failed: $($result.problem). Actual: $($result.actual | ConvertTo-Json -Depth 8 -Compress)" }
+            Write-Host "PASS $Case" -ForegroundColor Green
+            return
+        }
+        Start-Sleep -Milliseconds 50
+    }
+    throw "Timed out checking $Case."
+}
+
 if ($Mode -eq 'Shell') {
     Write-Host 'OSC 7501 alpha shell. Use Send-Status "state=working:progress=42".'
     Write-Host 'Use Send-Status "state=clear" to remove all records.'
@@ -119,15 +149,19 @@ try {
     [Console]::Write("$escapeByte" + 'c')
     Assert-Snapshot '09-full-reset' @()
 
+    $notification = Want @{ id = 'notification'; state = 'working'; progress = 73 }
+    Assert-Notification '10-status-notification' 'state=working:id=notification:progress=73' @($notification)
+    Send-Status 'state=clear'
+
     # A Lua mutation affects its copy, not the authoritative model. The native
     # snapshot test covers mutation directly; this checks fresh API reads too.
     Send-Status 'state=done:id=complete:app=smoke'
     $finished = Want @{ id = 'complete'; state = 'done'; app = 'smoke'; effective_app = 'smoke' }
-    Assert-Snapshot '10-finished-record' @($finished)
+    Assert-Snapshot '11-finished-record' @($finished)
     Send-Status 'state=working:id=exit-working'
     Send-Status 'state=blocked:id=exit-blocked:kind=auth'
-    Write-Host 'First 10 checks passed. Exiting the attached process to test final cleanup.' -ForegroundColor Green
-    Assert-Snapshot '11-attached-process-exit' @($finished) -AfterExit
+    Write-Host 'First 11 checks passed. Exiting the attached process to test final cleanup.' -ForegroundColor Green
+    Assert-Snapshot '12-attached-process-exit' @($finished) -AfterExit
     exit 0
 }
 catch {

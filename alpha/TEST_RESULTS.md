@@ -1,18 +1,18 @@
 # Alpha verification
 
-Date: October 27, 2026. Platform: Windows x64, MSVC development build.
+Initial verification: October 27, 2026. Review and rebuild: October 28, 2026. Platform: Windows x64, MSVC development build.
 
 Baseline source revision: `e2a98e1b8af156988ad0ac778658ac27b60a55fb`, with the local changes in `osc7501-alpha.patch`. The clean `wezterm/` reference remains unchanged. `source-manifest.json` records changed-file hashes; `build-info.json` records packaged binary hashes.
 
-## Completed source checks
+## Current source checks, October 28
 
 | Check | Result |
 | --- | --- |
-| `vtparse` library tests | 27 passed |
+| `vtparse` library tests | 31 passed |
 | `vtparse` heapless `no_std` build | Passed |
-| Escape parser with default no_std/alloc configuration | 29 passed |
-| Escape parser with std | 69 passed |
-| Terminal model and integration tests | 71 passed |
+| Escape parser with default no_std/alloc configuration | 31 passed |
+| Escape parser with std | 71 passed |
+| Terminal model and integration tests | 75 passed |
 | Focused Lua serialization contract | 1 passed |
 | Final Windows GUI and CLI build | Passed |
 | Patch against the clean reference, `git apply --check` | Passed, 22 changed/new source files |
@@ -26,9 +26,17 @@ The terminal integration tests exercise real incoming bytes, complete and fragme
 
 Framing tests cover incomplete and canceled reports, raw control bytes, oversized unterminated input, malformed semicolons and parser recovery. The new buffer bound is specific to recognized OSC 7501 input; unrelated OSCs retain their existing policy.
 
-## Native GUI and Lua
+## Reviewed native package, October 28
 
-The final packaged alpha passed all eleven native checks in:
+The rebuilt package passed all 12 native GUI/Lua checks in `test-results/73fe97e64cf644278836f60ccb00176e/`. The command was `Start-Alpha.ps1 -Mode Smoke -CloseAfterTest`, intentionally omitting `-Wait` to exercise the launcher fix. The new `10-status-notification` case succeeded using only cached formatter data after status-only output. Its result identifies the source as `formatter_cache_only`. The final case exited the attached process and preserved the done record.
+
+All six source checks above passed after the final source edits. The Windows GUI/CLI rebuild succeeded, the 22-file patch applies to the unchanged reference, and packaged executable, source and patch hashes match their manifests. PowerShell parsing and whitespace checks passed. The teaching HTML passed structural, offline dependency and control checks without a browser render.
+
+See [CODE_REVIEW.md](../CODE_REVIEW.md) for the malformed-byte/UTF-8 framing defects, late-exit replacement race, launcher cleanup fix and limits of the improved smoke assertion. The previous working package is preserved locally in `.recovery/2026-10-28-code-review/alpha/`.
+
+## Initial native GUI and Lua run, October 27
+
+The original packaged alpha passed all eleven native checks in:
 
 `test-results/ecf0282e79ac47f4ae361f29592c1ab4/`
 

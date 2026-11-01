@@ -1,6 +1,6 @@
 {
   "source_revision": "e2a98e1b8af156988ad0ac778658ac27b60a55fb",
-  "patch_sha256": "c8abfd6e66268da6b34803e24be21816b422748f7dc02d22bdd784e63b2111b8",
+  "patch_sha256": "d0288657edc3097110411de61ff5d41e5b38f37647d52910c903e9f9603beb1f",
   "applies_to_clean_reference": true,
   "files": [
     {
@@ -33,7 +33,7 @@
     },
     {
       "path": "term/src/program_status.rs",
-      "sha256": "6164509a1b7d8f8588217ca272ab039dd84105a3b9624460228acd75b5ced0fd"
+      "sha256": "22ac7f45cdb3b5f7011d75f342fd0f9ff2d8a35afc6d70b08da022c06a8a598b"
     },
     {
       "path": "term/src/terminal.rs",
@@ -53,11 +53,11 @@
     },
     {
       "path": "term/src/test/program_status.rs",
-      "sha256": "cd06f96d8159a92b1bd8665daee68841b2d14e8d1795909102207f43313c7a21"
+      "sha256": "4fda0f2e753e258500c83dda8a0bf7c748bf85831bd6c1cc5733cf2dc187abb8"
     },
     {
       "path": "vtparse/src/lib.rs",
-      "sha256": "a53fbddade5f266523c0d664368e6fc2ec44b5824c7419afa6cdc89742639045"
+      "sha256": "4c0f1c7e9317ab6adfb413800c3b6868c2dd6b38e5e7feb3e8b851bf2a763279"
     },
     {
       "path": "wezterm-escape-parser/src/lib.rs",
@@ -69,7 +69,7 @@
     },
     {
       "path": "wezterm-escape-parser/src/program_status.rs",
-      "sha256": "ac696cdccaf7bb6267771398c8bcc0f44d845a7657031b53c9a017e7a1612a19"
+      "sha256": "b3b75198a700e698f75c94bfb7ad730f94a88ff835bbd85d05f6cd720f05fb7b"
     },
     {
       "path": "wezterm-gui/src/frontend.rs",

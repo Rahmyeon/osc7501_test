@@ -5,6 +5,10 @@ param(
     [switch]$CloseAfterTest
 )
 $ErrorActionPreference = 'Stop'
+if ($Mode -eq 'Smoke' -and $CloseAfterTest) {
+    # A hidden unattended run must wait for the result before closing its GUI.
+    $Wait = $true
+}
 $alphaExecutable = Join-Path $PSScriptRoot 'bin/wezterm-gui.exe'
 if (-not (Test-Path -LiteralPath $alphaExecutable)) {
     throw 'The alpha binary is missing. Build and package it using the instructions in README.md.'

@@ -1,18 +1,20 @@
 {
   "source_checks": 6,
-  "native_checks": 11,
-  "native_run": "test-results\\ecf0282e79ac47f4ae361f29592c1ab4",
+  "native_checks": 12,
+  "native_run": "test-results/73fe97e64cf644278836f60ccb00176e",
   "packaged_binary_hashes_match": true,
   "source_hashes_match": true,
   "clean_reference_unchanged": true,
   "harness_hashes": {
-    "alpha.lua": "27232f35606887f55b05f9628aeb6ab8d6d34e4b714acae0ac95f94000846717",
-    "Start-Alpha.ps1": "4df7cc9647ec7a0864610df79035d58ae07a37a2657652ae90541fb33e9ee318",
-    "Exercise-Alpha.ps1": "fc56fe02b35b9fc398614e6badc6a621c73448a2061064fd27b9aaf4b746165b"
+    "alpha.lua": "6d2ee2802bdd8e5be8bcab3b6d623cb6fcd5b22bf8135b11544ca4e8cf189183",
+    "Start-Alpha.ps1": "1e224bd181abf27cef590fd6986c0474d416d65b4b77a15499a26a01615fb4f7",
+    "Exercise-Alpha.ps1": "0030529399e7aaec646a7bd0cdf78c422b9d26569473d854349fd1ecc70a4f56"
   },
   "interactive_launcher_visibility": {
     "verified": true,
     "title": "WezTerm OSC 7501 ALPHA",
     "window_handle_nonzero": true
-  }
+  },
+  "review_date": "2026-10-28",
+  "notification_case": "formatter_cache_only"
 }

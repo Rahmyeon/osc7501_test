@@ -1,1 +1,0 @@
-{"actual":[{"app":"cargo","effective_app":"cargo","id":"","progress":42,"state":"working"},{"effective_app":"cargo","id":"build/tests","kind":"permission","state":"blocked"}],"case":"04-invalid-is-atomic","ok":true}

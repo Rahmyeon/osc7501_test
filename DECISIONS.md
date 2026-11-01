@@ -6,7 +6,7 @@ Date: October 15, 2026.
 
 Status: accepted by the user.
 
-Decision: native local OSC 7501 support with Lua tab indicators for the October 29 presentation. Remote mux support follows.
+Decision: native local OSC 7501 support with Lua tab indicators. The presentation was originally October 29; the user updated it to November 2, 2026 on October 28. Remote mux support follows.
 
 Alternatives considered:
 
@@ -73,3 +73,17 @@ Decision: recognize OSC 7501 framing in vtparse to cap buffered input before a t
 Reason: checking the report body after parsing does not bound an unterminated input buffer. Generic semicolon parameter truncation and ignored controls could otherwise change a report before validation. Applying a global OSC limit would risk unrelated existing protocols.
 
 Consequence: this alpha adds a focused protocol-aware exception to the low-level parser. It needs explicit review if proposed upstream. It does not claim a new bound for every OSC sequence. Explicit invalid IDs are rejected before generic malformed-pair skipping, so they cannot silently address the root record. Reports only affect records after complete framing and validation.
+
+October 28 review correction: recognized OSC 7501 bodies retain malformed high bytes verbatim instead of passing through generic UTF-8 decoding, which could otherwise erase bytes or consume a following field separator. Raw C1 ST cancels this protocol's report; the supported terminators are BEL and ESC-backslash. This preserves the byte bound and prevents an invalid clear from addressing a different task. Other OSC parsing retains its existing path.
+
+## D006: Late transient replacement after attached-process exit
+
+Date: October 28, 2026.
+
+Status: correctness fix within the accepted model and lifecycle design.
+
+Decision: after attached-process exit, a buffered working or blocked report removes an existing record with exactly that ID. It does not clear descendants or make transient work visible. Finished/error reports can still arrive from buffered output and be retained.
+
+Reason: ignoring a late transient report entirely could retain an obsolete done/error record that the report was supposed to replace. Exact replacement followed by lifecycle cleanup must leave that ID absent. Finished children have independent records and remain valid.
+
+Consequence: the store returns changed only when it removes an existing record, so consumers refresh once and repeated late transient reports remain no-ops. This resolves ordering between the process waiter and PTY reader without moving ownership out of TerminalState.

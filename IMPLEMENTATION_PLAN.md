@@ -1,6 +1,6 @@
 # OSC 7501 in WezTerm
 
-Target presentation: October 29, 2026.
+Target presentation: November 2, 2026, updated by the user on October 28.
 
 ## Working arrangement
 
@@ -83,13 +83,15 @@ Implemented:
 
 Verification completed:
 
-- Framing parser: 27 tests passed; heapless no_std configuration compiles.
-- Escape parser: 29 default no_std/alloc tests and 69 std tests passed.
-- Terminal model: 71 tests passed.
+- Framing parser: 31 tests passed; heapless no_std configuration compiles.
+- Escape parser: 31 default no_std/alloc tests and 71 std tests passed.
+- Terminal model and integration: 75 tests passed.
 - Focused Lua contract: 1 test passed.
-- Native alpha: all 11 GUI/Lua checks passed, including actual attached-process exit.
+- Native alpha: all 12 GUI/Lua checks passed, including actual attached-process exit and a status-only refresh interval.
 - Final Windows GUI and CLI build succeeded; the packaged binary passed a fresh native run after the framing changes were frozen.
 - Source patch application check, script parsing and diff whitespace checks passed.
+
+The October 28 review fixed malformed-byte and incomplete-UTF-8 framing, a late-output process-exit replacement race, and automatic-close launcher behavior. The rebuilt package passed the checks above. The findings and scope are in [CODE_REVIEW.md](CODE_REVIEW.md); the learning document is [OSC7501_IMPLEMENTATION_GUIDE.md](OSC7501_IMPLEMENTATION_GUIDE.md), with an [offline interactive version](osc7501-implementation-guide.html).
 
 The local alpha is ready for user testing. Launch the guided demo with `alpha/Start-Alpha.ps1`, or run `alpha/Start-Alpha.ps1 -Mode Smoke -Wait` for the automated native checks. The verification report is [alpha/TEST_RESULTS.md](alpha/TEST_RESULTS.md).
 
